@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: cria-studio
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: STUDIO_PASSWORD
+        generateValue: true
+      - key: STUDIO_DATA_DIR
+        value: /data

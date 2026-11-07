@@ -1,0 +1,10 @@
+.git
+.studio
+.venv
+.env
+.env.*
+**/__pycache__
+**/*.pyc
+preview.html
+tests
+.github
