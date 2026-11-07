@@ -7,6 +7,7 @@ function toast(message) { $('toast').textContent=message; $('toast').hidden=fals
 async function api(path, options={}) {
   if (previewMode) return window.CRIA_PREVIEW.api(path,options);
   const response=await fetch(path,options); const data=await response.json();
+  if(response.status===401&&data.login)location.assign(data.login);
   if (!response.ok) throw new Error(data.error || 'Falha na comunicação com o estúdio.');
   return data;
 }
@@ -198,3 +199,13 @@ async function refreshJobs(){
   }catch{/* Preserve existing cards during a disconnect. */}finally{state.polling=false;}
 }
 choosePreset(state.preset);refreshJobs();setInterval(refreshJobs,2500);
+if(!previewMode){
+  fetch('/api/auth/status',{cache:'no-store'}).then(r=>r.json()).then(status=>{
+    $('logoutButton').hidden=!status.required;
+    if(status.required&&!status.authenticated)location.replace('/login');
+  }).catch(()=>{});
+  $('logoutButton').onclick=async()=>{
+    try{await api('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});location.replace('/login');}
+    catch(error){toast(error.message);}
+  };
+}

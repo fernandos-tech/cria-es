@@ -1,5 +1,4 @@
 import http.client
-import base64
 import json
 import os
 from pathlib import Path
@@ -10,10 +9,21 @@ import tempfile
 import time
 import unittest
 
-from studio import media, templates
+from studio import media, templates, auth
 
 
 class EditingRules(unittest.TestCase):
+    def test_sessions_expiration_and_limits(self):
+        password=secrets.token_urlsafe(32)+'çã'
+        sessions=auth.Sessions(password,username='usuarioadmin',lifetime=-1)
+        token=sessions.login('usuarioadmin',password,'owner')
+        self.assertFalse(sessions.valid(token))
+        sessions=auth.Sessions(password,username='usuarioadmin')
+        for _ in range(6):
+            with self.assertRaises(auth.InvalidCredentials):sessions.login('usuarioadmin','wrong','attacker')
+        with self.assertRaises(auth.TooManyAttempts):sessions.login('usuarioadmin',password,'attacker')
+        token=sessions.login('usuarioadmin',password,'owner')
+        self.assertTrue(sessions.valid(token));sessions.logout(token);self.assertFalse(sessions.valid(token))
     def test_watermark_validation_and_title_suggestions(self):
         for wm in ({'enabled':True,'text':''},{'position':'somewhere'},{'opacity':float('nan')},{'text':'a\nb'}):
             with self.subTest(wm=wm),self.assertRaises(ValueError):media.watermark_settings(wm)
@@ -196,30 +206,49 @@ class HostedAccess(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-            password=secrets.token_urlsafe(32)
+            password=secrets.token_urlsafe(32)+'Çã@'
             with (Path(temporary)/'hosted.log').open('w') as log:
                 process=subprocess.Popen(['python3','-m','studio.server','--port',str(port)],
-                    env=dict(os.environ,STUDIO_DATA_DIR=temporary,STUDIO_PASSWORD=password),stdout=log,stderr=log)
+                    env=dict(os.environ,STUDIO_DATA_DIR=temporary,STUDIO_PASSWORD=password,STUDIO_USERNAME='usuarioadmin'),stdout=log,stderr=log)
                 try:
-                    def request(path,authorization=None,method='GET'):
+                    def request(path,cookie=None,method='GET',data=None,extra=None):
                         connection=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
-                        headers={'Authorization':authorization} if authorization else {}
-                        connection.request(method,path,headers=headers)
-                        response=connection.getresponse();data=response.read();status=response.status;connection.close()
-                        return status,data
+                        headers={'Cookie':cookie} if cookie else {}
+                        headers.update(extra or {})
+                        if data is not None:headers['Content-Type']='application/json'
+                        body=json.dumps(data).encode() if data is not None else None
+                        connection.request(method,path,body=body,headers=headers)
+                        response=connection.getresponse();result=response.read();status=response.status;returned=dict(response.getheaders());connection.close()
+                        return status,result,returned
                     for _ in range(100):
                         try:
                             if request('/api/health')[0]==200:break
                         except OSError:pass
                         time.sleep(.1)
-                    self.assertEqual(request('/')[0],401)
+                    root=request('/');self.assertEqual(root[0],303);self.assertEqual(root[2]['Location'],'/login')
+                    self.assertNotIn('WWW-Authenticate',root[2])
+                    self.assertEqual(request('/login')[0],200)
+                    self.assertEqual(request('/login.css')[0],200)
+                    self.assertEqual(request('/login.js')[0],200)
+                    self.assertEqual(request('/api/health',method='HEAD')[0],200)
                     self.assertEqual(request('/api/jobs')[0],401)
                     self.assertEqual(request('/api/upload',method='POST')[0],401)
                     self.assertEqual(request('/media/'+'a'*32)[0],401)
-                    self.assertEqual(request('/','Basic invalid!')[0],401)
-                    valid='Basic '+base64.b64encode(('studio:'+password).encode()).decode()
-                    self.assertEqual(request('/',valid)[0],200)
-                    self.assertEqual(request('/api/jobs',valid)[0],200)
+                    self.assertEqual(request('/api/jobs','cria_session=forged')[0],401)
+                    bad=request('/api/auth/login',method='POST',data={'username':'usuarioadmin','password':'wrong'})
+                    self.assertEqual(bad[0],401);self.assertNotIn('Set-Cookie',bad[2])
+                    valid=request('/api/auth/login',method='POST',data={'username':'usuarioadmin','password':password},extra={'X-Forwarded-Proto':'https'})
+                    self.assertEqual(valid[0],200,valid[1]);cookie=valid[2]['Set-Cookie']
+                    self.assertIn('HttpOnly',cookie);self.assertIn('Secure',cookie);self.assertIn('SameSite=Strict',cookie)
+                    token=cookie.split(';')[0]
+                    self.assertEqual(request('/',token)[0],200)
+                    self.assertEqual(request('/api/jobs',token)[0],200)
+                    self.assertEqual(request('/login',token)[0],303)
+                    self.assertTrue(json.loads(request('/api/auth/status',token)[1])['authenticated'])
+                    cross=request('/api/auth/login',method='POST',data={'username':'usuarioadmin','password':password},extra={'Sec-Fetch-Site':'cross-site'})
+                    self.assertEqual(cross[0],403)
+                    self.assertEqual(request('/api/auth/logout',token,method='POST',data={})[0],200)
+                    self.assertEqual(request('/api/jobs',token)[0],401)
                     self.assertEqual(request('/api/health')[0],200)
                 finally:
                     process.terminate();process.wait(timeout=10)

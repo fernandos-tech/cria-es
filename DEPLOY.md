@@ -22,9 +22,18 @@ na tela antes de confirmar; disponibilidade e limites são definidos pelo proved
 Nenhuma credencial do Render é incluída no código ou precisa ser enviada no chat.
 
 O serviço escuta em `0.0.0.0:$PORT`. `/api/health` é público para a verificação do provedor.
-O restante exige autenticação HTTP Basic: usuário **studio**, senha **STUDIO_PASSWORD**,
-gerada no Render e consultável pelo proprietário na configuração segura do serviço.
+O restante exige login pela página **/login**: usuário padrão **studio**, senha
+**STUDIO_PASSWORD**, gerada no Render e consultável pelo proprietário na configuração
+segura do serviço. **STUDIO_USERNAME** permite configurar outro usuário, se desejado;
+a tela preenche o nome configurado. Não use STUDIO_DATA_DIR para configurar usuário:
+essa variável deve permanecer **/data** neste contêiner.
+
 Use o endereço HTTPS fornecido pelo Render. O servidor recusa escuta externa sem senha.
+O login usa uma sessão de até oito horas, com cookie HttpOnly, SameSite=Strict e Secure
+em HTTPS. O botão **Sair** invalida a sessão. Reiniciar a instância pede um novo login.
+A senha não é armazenada em localStorage ou no cookie. A janela de autenticação
+HTTP Basic foi substituída pela página para evitar pedidos repetitivos no navegador.
+Se o navegador bloquear cookies, a página avisa e orienta abrir em uma aba externa.
 
 O plano gratuito usa armazenamento temporário e pode suspender o serviço quando ocioso.
 Baixe os vídeos concluídos: uploads, logos e versões podem desaparecer quando a instância

@@ -21,8 +21,13 @@ O servidor escuta somente na interface local por padrão. O endpoint `/api/healt
 informa se o servidor está ativo e se FFmpeg e ffprobe estão disponíveis.
 Use a interface pelo acesso ao servidor oferecido pelo ambiente de desenvolvimento.
 É um aplicativo de um único proprietário. Em hospedagem externa, defina
-`STUDIO_PASSWORD`: o navegador solicitará usuário `studio` e essa senha, protegendo
-editor, API e vídeos. Somente `/api/health` permanece público. O servidor recusa
+`STUDIO_PASSWORD`: o site mostrará uma página de login, protegendo editor, API e vídeos.
+O usuário padrão é `studio`; `STUDIO_USERNAME` permite escolher outro nome. A tela
+preenche o usuário configurado. A senha aceita acentos e é a do estúdio no Render,
+não necessariamente a senha da conta Render. Sessões duram até oito horas e são
+encerradas pelo botão **Sair** ou pelo reinício do servidor. A senha não é guardada
+no navegador; o identificador de sessão usa cookie HttpOnly. O teste `/api/health`
+e os arquivos da tela de login permanecem públicos. O servidor recusa
 escuta externa sem senha. Use HTTPS no provedor. Processos precisam ser reiniciados
 em novas sessões.
 
@@ -113,6 +118,9 @@ e legendas, baixam os MP4 e verificam duração, dimensões, codec e taxa de qua
 Também verificam entradas inválidas, intervalos de streaming e vídeos sem áudio.
 Os testes de templates verificam os pixels da faixa e do logo no vídeo final,
 o vínculo da nova versão com o original e o tratamento literal de texto da marca.
+Os testes de autenticação verificam cookies seguros, login com senha acentuada,
+usuário personalizado, rejeição de senha errada, expiração, logout e bloqueio de
+acesso à API e aos vídeos sem sessão. `HEAD /api/health` também é suportado.
 
 ## Referências de plataformas
 

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090c0b">
+  <title>Entrar · Cria Studio</title><link rel="stylesheet" href="/login.css"><script src="/login.js" defer></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23c1ff61'/%3E%3Ctext x='7' y='25' font-size='28' fill='%23090c0b'%3Ec%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">c</span>cria<span>studio</span></div>
+    <div class="login-grid">
+      <section class="intro"><span class="eyebrow">SEU ESPAÇO CRIATIVO</span><h1>Seu próximo<br>grande corte<br><em>começa aqui.</em></h1><p>Entre no estúdio para criar, editar e dar uma nova dimensão ao seu conteúdo.</p><div class="orbit" aria-hidden="true"><i></i><i></i><i></i><span>✧</span></div><div class="intro-footer">CRIE. CORTE. CAUSE IMPACTO.</div></section>
+      <section class="login-card" aria-labelledby="loginTitle"><span class="badge">ACESSO AO ESTÚDIO</span><h2 id="loginTitle">Vamos criar?</h2><p>Entre com as credenciais configuradas para este estúdio.</p>
+        <form id="loginForm">
+          <label for="username">Usuário</label><input id="username" name="username" autocomplete="username" value="studio" required maxlength="1024" autocapitalize="none" spellcheck="false">
+          <label for="password">Senha do estúdio</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024"><button type="button" id="showPassword" aria-pressed="false" aria-controls="password">Mostrar</button></div>
+          <div id="loginError" role="alert" hidden></div><button class="submit" id="loginButton" type="submit">Entrar no estúdio <span aria-hidden="true">→</span></button>
+        </form>
+        <details><summary>Onde encontro minha senha?</summary><p>No painel do seu serviço no Render, abra <strong>Environment</strong> e consulte <strong>STUDIO_PASSWORD</strong>. Use esse valor no campo acima.</p><p>Essa é a senha do estúdio, definida na hospedagem. Ela pode ser diferente da senha da sua conta Render. O usuário padrão é <strong>studio</strong>.</p></details>
+        <div class="privacy-note"><span aria-hidden="true">●</span> Sua senha não é salva neste navegador.</div>
+      </section>
+    </div><footer>cria studio <span>FEITO PARA CRIAR ALÉM.</span></footer>
+  </main>
+</body></html>

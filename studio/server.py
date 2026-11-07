@@ -1,8 +1,5 @@
 """Single-user editing studio. Run: python3 -m studio.server"""
 import argparse
-import base64
-import binascii
-import hmac
 import json
 import mimetypes
 import os
@@ -12,10 +9,11 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie, CookieError
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from . import media, templates
+from . import media, templates, auth
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('STUDIO_DATA_DIR', ROOT.parent / '.studio')).resolve()
@@ -23,6 +21,7 @@ MAX_UPLOAD = 2 * 1024**3
 POOL = ThreadPoolExecutor(max_workers=1)
 LOCK = threading.Lock()
 JOBS = {}
+AUTH = auth.Sessions(os.environ.get('STUDIO_PASSWORD', ''), os.environ.get('STUDIO_USERNAME', 'studio'))
 
 
 def identifier(value):
@@ -61,14 +60,17 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(300)
 
-    def json(self, data, status=200):
+    def json(self, data, status=200, headers=None):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != 'HEAD':
+            self.wfile.write(body)
 
     def body(self):
         size = int(self.headers.get('Content-Length', '0'))
@@ -79,39 +81,72 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('Envie um objeto JSON.')
         return data
 
-    def authenticate(self):
-        password = os.environ.get('STUDIO_PASSWORD')
-        if not password:
-            return True
-        header = self.headers.get('Authorization', '')
+    def session_token(self):
         try:
-            scheme, encoded = header.split(' ', 1)
-            credentials = base64.b64decode(encoded, validate=True).decode('utf-8')
-            username, supplied = credentials.split(':', 1)
-            if scheme.lower() == 'basic' and username == 'studio' and hmac.compare_digest(supplied.encode(), password.encode()):
-                return True
-        except (ValueError, UnicodeError, binascii.Error):
-            pass
-        self.close_connection = True
-        body = 'Acesso privado. Use o usuário studio e a senha configurada na hospedagem.'.encode('utf-8')
-        self.send_response(401)
-        self.send_header('WWW-Authenticate', 'Basic realm="Cria Studio", charset="UTF-8"')
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
+            cookie = SimpleCookie(self.headers.get('Cookie', ''))
+            return cookie['cria_session'].value if 'cria_session' in cookie else ''
+        except CookieError:
+            return ''
+
+    def signed_in(self):
+        return not AUTH.required or AUTH.valid(self.session_token())
+
+    def redirect(self, destination):
+        self.send_response(303)
+        self.send_header('Location', destination)
+        self.send_header('Content-Length', '0')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(body)
+        self.close_connection = True
+
+    def authenticate(self):
+        if self.signed_in():
+            return True
+        self.close_connection = True
+        if urlsplit(self.path).path == '/':
+            self.redirect('/login')
+        else:
+            self.json({'error': 'Sua sessão expirou. Entre novamente.', 'login': '/login'}, 401)
         return False
 
+    def cookie_header(self, token, expires=False):
+        secure = '; Secure' if self.headers.get('X-Forwarded-Proto', '').split(',')[0].strip() == 'https' else ''
+        age = 0 if expires else AUTH.lifetime
+        return f'cria_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={age}{secure}'
+
+    def login(self):
+        if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
+            self.close_connection = True
+            return self.json({'error': 'Envie o login pela página de entrada.'}, 415)
+        try:
+            raw = self.body()
+            if any(not isinstance(raw.get(key), str) or len(raw[key]) > 1024 for key in ('username', 'password')):
+                raise ValueError('Informe usuário e senha.')
+            token = AUTH.login(raw['username'].strip(), raw['password'], self.client_address[0])
+            return self.json({'ok': True}, headers={'Set-Cookie': self.cookie_header(token)})
+        except auth.InvalidCredentials:
+            return self.json({'error': 'Usuário ou senha não conferem. Use a senha de STUDIO_PASSWORD no Render.'}, 401)
+        except auth.TooManyAttempts:
+            return self.json({'error': 'Muitas tentativas. Aguarde um minuto e tente novamente.'}, 429, {'Retry-After': '60'})
+        except (ValueError, TypeError):
+            self.close_connection = True
+            return self.json({'error': 'Informe usuário e senha válidos.'}, 400)
+
     def do_POST(self):
-        if not self.authenticate():
-            return
         # This service is intended for a trusted, single-user environment.
         # Block cross-site browser submissions; no CORS access is granted.
         if self.headers.get('Sec-Fetch-Site') == 'cross-site':
             self.close_connection = True
             return self.json({'error': 'Origem não permitida.'}, 403)
+        if urlsplit(self.path).path == '/api/auth/login':
+            return self.login()
+        if not self.authenticate():
+            return
+        if urlsplit(self.path).path == '/api/auth/logout':
+            AUTH.logout(self.session_token())
+            self.close_connection = True
+            return self.json({'ok': True}, headers={'Set-Cookie': self.cookie_header('', expires=True)})
         try:
             path = urlsplit(self.path).path
             if path == '/api/upload':
@@ -230,7 +265,16 @@ class Handler(BaseHTTPRequestHandler):
             raw.unlink(missing_ok=True)
 
     def do_GET(self):
-        if urlsplit(self.path).path != '/api/health' and not self.authenticate():
+        path = urlsplit(self.path).path
+        if path == '/api/auth/status':
+            return self.json({'required': AUTH.required, 'authenticated': self.signed_in(), 'username': AUTH.username})
+        public = {'/login': 'login.html', '/login.js': 'login.js', '/login.css': 'login.css',
+                  '/fonts/space-grotesk-latin.woff2': 'fonts/space-grotesk-latin.woff2'}
+        if path in public:
+            if path == '/login' and self.signed_in():
+                return self.redirect('/')
+            return self.file(ROOT / 'web' / public[path], private=True)
+        if path != '/api/health' and not self.authenticate():
             return
         try:
             path = urlsplit(self.path).path
@@ -268,7 +312,10 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError):
             self.json({'error': 'Arquivo não encontrado.'}, 404)
 
-    def file(self, path, download=False, content_type=None):
+    def do_HEAD(self):
+        self.do_GET()
+
+    def file(self, path, download=False, content_type=None, private=False):
         if not path.is_file():
             return self.json({'error': 'Arquivo não encontrado.'}, 404)
         size = path.stat().st_size
@@ -294,11 +341,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(end-start+1))
         self.send_header('Accept-Ranges', 'bytes')
         self.send_header('X-Content-Type-Options', 'nosniff')
+        if private or AUTH.required:
+            self.send_header('Cache-Control', 'no-store')
         if range_header:
             self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
         if download:
             self.send_header('Content-Disposition', f'attachment; filename="corte-{path.stem[:8]}.mp4"')
         self.end_headers()
+        if self.command == 'HEAD':
+            return
         try:
             with path.open('rb') as source:
                 source.seek(start)
