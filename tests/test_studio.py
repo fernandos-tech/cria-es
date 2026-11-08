@@ -24,6 +24,23 @@ class EditingRules(unittest.TestCase):
         with self.assertRaises(auth.TooManyAttempts):sessions.login('usuarioadmin',password,'attacker')
         token=sessions.login('usuarioadmin',password,'owner')
         self.assertTrue(sessions.valid(token));sessions.logout(token);self.assertFalse(sessions.valid(token))
+
+    def test_session_survives_process_restart_and_logout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'sessions.json';password=secrets.token_urlsafe(24)
+            first=auth.Sessions(password);first.attach_storage(path);token=first.login('studio',password,'owner')
+            second=auth.Sessions(password);second.attach_storage(path);self.assertTrue(second.valid(token))
+            self.assertNotIn(token,path.read_text());second.logout(token)
+            third=auth.Sessions(password);third.attach_storage(path);self.assertFalse(third.valid(token))
+            changed=auth.Sessions(password+'changed');changed.attach_storage(path);self.assertFalse(changed.valid(token))
+
+    def test_choices_are_derived_from_spoken_content(self):
+        cues=[(0,2,'Este perfume tem notas cítricas.'),(2,4,'A duração dele é muito boa.'),(4,6,'Prefiro o segundo perfume para o verão.')]
+        options=templates.choices('',cues,0,6,'reels')
+        self.assertGreaterEqual(len(options),2)
+        for option in options:
+            self.assertTrue(option['title']);self.assertIn('#reels',option['hashtags'])
+        self.assertEqual(templates.choices('',[],0,2,'reels'),[])
     def test_watermark_validation_and_title_suggestions(self):
         for wm in ({'enabled':True,'text':''},{'position':'somewhere'},{'opacity':float('nan')},{'text':'a\nb'}):
             with self.subTest(wm=wm),self.assertRaises(ValueError):media.watermark_settings(wm)
@@ -53,6 +70,17 @@ class EditingRules(unittest.TestCase):
 
 
 class FullWorkflow(unittest.TestCase):
+    def test_missing_speech_does_not_lose_video_or_photo(self):
+        source=self.directory/'silent-fallback.mp4'
+        media.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=160x90:r=30','-t','0.5','-c:v','libx264','-threads','1',str(source)])
+        status,_,body=self.request('POST','/api/upload',source.read_bytes(),{'X-Filename':'silent.mp4'})
+        self.assertEqual(status,201);asset=json.loads(body)
+        status,_,body=self.request('POST','/api/export',json.dumps(dict(asset_id=asset['id'],end=.5,template=dict(id='impact'))))
+        self.assertEqual(status,202,body);job=self.wait_job(json.loads(body)['jobs'][0]['id'])
+        self.assertEqual(job['options']['template']['id'],'none');self.assertEqual(job['requested_template']['id'],'impact')
+        self.assertFalse(job['publication']['choices']);self.assertTrue(job['warnings'])
+        self.assertEqual(self.request('GET',job['photo'])[0],200);self.assertEqual(self.request('GET',job['download'])[0],200)
+
     def wait_job(self,job_id):
         deadline=time.monotonic()+90
         while time.monotonic()<deadline:
@@ -81,6 +109,8 @@ class FullWorkflow(unittest.TestCase):
             status,_,body=self.request('POST','/api/export',json.dumps(options))
             self.assertEqual(status,202,body);job=self.wait_job(json.loads(body)['jobs'][0]['id'])
             self.assertEqual(job['parent_id'],parent['id']);self.assertEqual(job['asset_id'],asset['id'])
+            self.assertEqual(self.request('GET',job['photo'])[0],200)
+            self.assertEqual(self.request('GET',job['cover'])[0],200)
             self.assertIn('#perfumes',job['publication']['hashtags'])
             output=self.directory/'data'/'exports'/(job['id']+'.mp4')
             info=media.probe(output);self.assertEqual((info['width'],info['height']),(1080,1920))
@@ -98,6 +128,22 @@ class FullWorkflow(unittest.TestCase):
         self.wait_job(json.loads(body)['jobs'][0]['id'])
         self.assertEqual(self.request('POST','/api/watermark',b'not an image')[0],400)
         self.assertEqual(self.request('GET','/api/assets/'+asset['id'])[0],200)
+
+    def test_template_uses_a_static_photo_and_automatic_title(self):
+        status,_,body=self.request('POST','/api/upload',self.source.read_bytes(),{'X-Filename':'automatic.mp4'})
+        self.assertEqual(status,201);asset=json.loads(body)
+        raw=dict(asset_id=asset['id'],start=0,end=1,template=dict(id='impact',title='',highlight='',topic=''),
+                 subtitles='1\n00:00:00,000 --> 00:00:01,000\nEste perfume tem notas cítricas. A duração dele é excelente. Prefiro usar no verão.\n')
+        status,_,body=self.request('POST','/api/export',json.dumps(raw));self.assertEqual(status,202,body)
+        job=self.wait_job(json.loads(body)['jobs'][0]['id']);self.assertTrue(job['options']['template']['title'])
+        self.assertGreaterEqual(len(job['publication']['choices']),2)
+        video=self.directory/'data'/'exports'/(job['id']+'.mp4')
+        # The lower photograph is fixed while the source video keeps moving above it.
+        data=subprocess.run(['ffmpeg','-v','error','-i',str(video),'-vf',r'select=eq(n\,0)+eq(n\,20),crop=240:160:400:1350',
+             '-vsync','0','-frames:v','2','-threads','1','-pix_fmt','rgb24','-f','rawvideo','-'],capture_output=True,check=True).stdout
+        length=240*160*3;self.assertEqual(len(data),length*2)
+        error=sum(abs(a-b) for a,b in zip(data[:length],data[length:]))/length
+        self.assertLess(error,3)
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
@@ -111,7 +157,7 @@ class FullWorkflow(unittest.TestCase):
             cls.port = sock.getsockname()[1]
         cls.log = (cls.directory / 'server.log').open('w')
         cls.process = subprocess.Popen(['python3', '-m', 'studio.server', '--port', str(cls.port)],
-                                       env=dict(os.environ, STUDIO_DATA_DIR=str(cls.directory / 'data')),
+                                       env=dict(os.environ, STUDIO_DATA_DIR=str(cls.directory / 'data'), AUTO_TRANSCRIBE='0'),
                                        stdout=cls.log, stderr=cls.log)
         for _ in range(100):
             try:
@@ -204,6 +250,8 @@ class FullWorkflow(unittest.TestCase):
 class HostedAccess(unittest.TestCase):
     def test_password_protects_editor_media_and_uploads(self):
         with tempfile.TemporaryDirectory() as temporary:
+            exports=Path(temporary)/'exports';exports.mkdir()
+            (exports/('a'*32+'.transcript.json')).write_text('[[0,1,"fala de teste"]]')
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
             password=secrets.token_urlsafe(32)+'Çã@'

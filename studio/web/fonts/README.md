@@ -6,3 +6,11 @@ SHA-512 declarado pelo registro antes da extração. Apenas a fonte Latin e sua 
 foram incluídas. Licença SIL Open Font License 1.1: consulte `OFL.txt`.
 
 Origem: https://www.npmjs.com/package/@fontsource-variable/space-grotesk
+
+# Montserrat
+
+Fonte variável usada nos títulos dos templates, com peso Black (900). Obtida do
+repositório oficial Google Fonts. Licença SIL Open Font License 1.1:
+consulte `Montserrat-OFL.txt`.
+
+Origem: https://github.com/google/fonts/tree/main/ofl/montserrat

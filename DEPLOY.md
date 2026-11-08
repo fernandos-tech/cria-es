@@ -30,7 +30,7 @@ essa variável deve permanecer **/data** neste contêiner.
 
 Use o endereço HTTPS fornecido pelo Render. O servidor recusa escuta externa sem senha.
 O login usa uma sessão de até oito horas, com cookie HttpOnly, SameSite=Strict e Secure
-em HTTPS. O botão **Sair** invalida a sessão. Reiniciar a instância pede um novo login.
+em HTTPS. O botão **Sair** invalida a sessão. Reinícios que preservam `/data` preservam a sessão. Se os dados forem apagados, o editor permite reconectar sem fechar os ajustes.
 A senha não é armazenada em localStorage ou no cookie. A janela de autenticação
 HTTP Basic foi substituída pela página para evitar pedidos repetitivos no navegador.
 Se o navegador bloquear cookies, a página avisa e orienta abrir em uma aba externa.
@@ -57,3 +57,14 @@ docker run --rm -p 127.0.0.1:10000:10000 -e STUDIO_PASSWORD \
 Use um proxy reverso com HTTPS para acesso externo. O volume preserva os arquivos
 entre reinícios. O usuário do contêiner tem UID 10001; diretórios montados precisam
 permitir escrita para esse usuário. Não inclua `.env`, senhas ou vídeos na imagem.
+
+## Modelo de fala e foto automática
+
+A imagem Docker instala `requirements.txt` e ativa `AUTO_TRANSCRIBE=1`. O primeiro corte
+com fala baixa Whisper Tiny em `/data/models`. Permita acesso a `huggingface.co` e aos
+CDNs de modelos usados por Hugging Face. O cache é temporário no plano gratuito.
+A imagem não inclui credenciais nem pesos baixados sem verificação.
+
+Depois de gerar um corte com fala, confirme no cartão as opções de título/legenda e
+a foto automática. O modelo e o renderizador rodam em sequência para reduzir o pico
+de memória. Vídeos muito longos e modelos maiores podem exceder os limites do plano.

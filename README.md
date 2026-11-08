@@ -10,11 +10,13 @@ do Render. A prévia estática não processa MP4; o serviço com FFmpeg processa
 ## Iniciar
 
 Requisitos: Python 3.12+, FFmpeg 7+ com libx264, AAC e libass, e fonte DejaVu Sans.
-Não há dependências Python ou JavaScript para instalar.
+Instale as dependências Python fixadas em `requirements.txt` em um ambiente virtual. Não há build JavaScript.
 
 ```bash
 cd /workspace/cria-es
-python3 -m studio.server --port 8000
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m studio.server --port 8000
 ```
 
 O servidor escuta somente na interface local por padrão. O endpoint `/api/health`
@@ -25,7 +27,7 @@ Use a interface pelo acesso ao servidor oferecido pelo ambiente de desenvolvimen
 O usuário padrão é `studio`; `STUDIO_USERNAME` permite escolher outro nome. A tela
 preenche o usuário configurado. A senha aceita acentos e é a do estúdio no Render,
 não necessariamente a senha da conta Render. Sessões duram até oito horas e são
-encerradas pelo botão **Sair** ou pelo reinício do servidor. A senha não é guardada
+encerradas pelo botão **Sair**, pela expiração ou pela perda do armazenamento. Reinícios que preservam `.studio` preservam a sessão; o editor permite reconectar sem fechar os ajustes. A senha não é guardada
 no navegador; o identificador de sessão usa cookie HttpOnly. O teste `/api/health`
 e os arquivos da tela de login permanecem públicos. O servidor recusa
 escuta externa sem senha. Use HTTPS no provedor. Processos precisam ser reiniciados
@@ -55,15 +57,14 @@ O arquivo exportado contém o enquadramento, título, legendas e marca d’água
 
 ## Templates, marca d’água e publicação
 
-- **Duplo impacto:** dois recortes sincronizados com faixa preta central, título
-  branco e expressão em amarelo.
-- **Comparativo:** plano superior e dois recortes inferiores do mesmo vídeo.
-- **Faixa vermelha:** dois planos com título central em fundo vermelho.
+- **Referência 1:** vídeo superior, faixa preta em degradê, título Montserrat Black branco/amarelo e foto fixa inferior. Quando ativada como texto, a marca aparece abaixo do título, com os ícones do modelo.
+- **Referência 2:** vídeo superior, título branco/amarelo e foto inferior dividida em dois enquadramentos.
+- **Referência 3:** dois planos com margens pretas, faixa vermelha com contorno irregular de papel rasgado e título branco.
 
-Todos geram 1080 × 1920. O título e a expressão em destaque são editáveis. Os planos
-usam recortes fixos do mesmo vídeo, sem detecção de rostos ou troca de câmeras.
-O template de faixa vermelha usa uma faixa retangular; não reproduz a textura rasgada
-da imagem de referência. Marcas, pessoas e imagens das referências não são incorporadas.
+Todos geram 1080 × 1920. A foto inferior é extraída automaticamente do meio do corte;
+ela permanece estática enquanto o vídeo superior toca. As prévias usam os frames do seu
+vídeo, sem imagens genéricas de demonstração. Os enquadramentos são fixos, sem detecção de rostos.
+A composição segue as referências; o conteúdo vem do vídeo enviado e da sua própria marca.
 
 **Marca d’água automática** aceita texto/@perfil ou logo PNG/JPEG de até 5 MB e
 16 megapixels. Posição, opacidade e tamanho são configuráveis e ficam salvos no navegador.
@@ -71,11 +72,28 @@ A marca é aplicada em cada corte do lote. PNG transparente preserva o fundo.
 Logos enviados ficam em `.studio/watermarks`; sua referência é reaproveitada no servidor.
 A prévia de posição é aproximada no enquadramento padrão; confira o MP4 final.
 
-Informe o **Tema do corte** ou importe SRT e clique em **Sugerir título, legenda e
-hashtags**. A sugestão é local, baseada nesse texto e nas falas SRT do intervalo;
-não usa análise semântica por IA, dados de tendências ou alegações de viralização.
-A legenda para publicação é editável e copiável. Ela é separada das legendas SRT
-gravadas no vídeo. Não há publicação automática em redes sociais.
+### Títulos, legenda para publicação e hashtags automáticos
+
+O servidor transcreve o áudio em português com Faster Whisper Tiny, CPU/int8. Cada
+transcrição roda em um processo isolado que termina antes da renderização. O primeiro
+corte com fala baixa o modelo público de Hugging Face; o cache fica em `STUDIO_MODEL_DIR`
+(`/data/models` no Docker, `.studio/models` no ambiente local). Não exige chave de API.
+A primeira execução pode demorar; o progresso aparece no cartão do corte.
+
+Após concluir, o cartão oferece opções extraídas das frases reconhecidas. Escolha uma
+para preencher título, destaque, legenda e hashtags. Não é necessário digitar um título;
+o campo manual continua como ajuste opcional. O tema adicional e SRT também são opcionais.
+A quantidade de opções depende da fala disponível. O modelo pode errar palavras; revise
+antes de publicar. Não há análise de tendências nem garantia de viralização.
+
+`AUTO_TRANSCRIBE=0` desliga a transcrição para ambientes de teste sem fala. `STUDIO_WHISPER_MODEL`
+permite trocar o modelo; modelos maiores exigem mais memória. A prévia HTML não executa
+Whisper: ela demonstra opções a partir de SRT e sinaliza a transcrição como recurso do servidor.
+
+Se o modelo não puder ser baixado ou não houver fala reconhecida, o vídeo e a foto ainda
+são gerados; um aviso informa que o template com título não foi aplicado. Não são inventados
+títulos genéricos. É possível aplicar novamente o template depois de obter a transcrição.
+As sugestões de publicação são separadas das legendas SRT gravadas no vídeo.
 
 A reedição usa intervalos do vídeo original. Metadados de fonte e parentesco ficam
 salvos junto às exportações para que as versões concluídas possam ser editadas após reiniciar.
@@ -103,13 +121,13 @@ Uploads, metadados, legendas ajustadas e exportações ficam em `.studio/`, igno
 Defina `STUDIO_DATA_DIR` para usar outro diretório. Exportações concluídas são recuperadas
 quando o servidor reinicia; tarefas em processamento não são retomadas automaticamente.
 Arquivos não são apagados automaticamente. A divisão atual é por duração, sem análise
-semântica, detecção de melhores momentos, transcrição automática ou acompanhamento de rosto.
+semântica dos melhores momentos ou acompanhamento de rosto. A transcrição automática se limita à fala do intervalo escolhido.
 Não há publicação nas redes sociais, integrações externas ou chaves de API nesta versão.
 
 ## Verificação
 
 ```bash
-python3 -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 node --check studio/web/app.js
 ```
 
@@ -131,3 +149,22 @@ acesso à API e aos vídeos sem sessão. `HEAD /api/health` também é suportado
 As consultas a essas páginas foram bloqueadas pela política de rede do ambiente durante
 a implementação. Os presets são uma base técnica comum e editável; não representam
 verificação atual dos limites de publicação das plataformas. A duração é configurável.
+
+## Recursos e validação
+
+A exportação usa um trabalhador por vez. Templates são montados em duas etapas com um
+intermediário H.264 sem perdas, que é apagado após o uso. A fonte é recortada antes de
+redimensionar; imagens estáticas e o codificador usam uma thread e buffers reduzidos.
+O modo de proporção original limita o maior lado a 1920 pixels para o serviço de memória limitada.
+Os gráficos dos títulos são gerados em processo isolado; o servidor não retém essa memória.
+
+Cada corte salva automaticamente sua foto inferior e uma capa JPEG. Sessões são persistidas
+com identificadores em hash e arquivo privado em `.studio/.sessions.json`. Trocar senha ou
+usuário invalida as sessões anteriores. Trabalhos interrompidos são identificados como erro
+no reinício, sem confundir arquivos de transcrição com metadados de exportação. No plano
+gratuito do Render, recriar a instância pode apagar arquivos e sessões; persistência completa
+depende de armazenamento durável.
+
+A integração de transcrição está instalada e a CPU suporta int8. O download do modelo
+não pôde ser validado neste ambiente devido a bloqueio de rede para Hugging Face.
+Essa validação permanece pendente até a liberação ou o primeiro teste real no Render.

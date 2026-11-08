@@ -3,6 +3,8 @@ import json
 import math
 import re
 import subprocess
+import sys
+import os
 from pathlib import Path
 from . import templates
 
@@ -135,11 +137,33 @@ def clip_srt(cues, start, end):
     return '\n'.join(out)
 
 
+def prepare_top(source, output, options):
+    height=900 if options['template']['id']=='red' else 960
+    target=Path(output).with_suffix('.top.mkv')
+    try:
+        run(['ffmpeg','-nostdin','-v','error','-y','-threads','1','-ss',str(options['start']),'-i',str(Path(source).resolve()),
+             '-t',str(options['end']-options['start']),'-map','0:v:0','-map','0:a:0?','-sn','-dn',
+             '-filter_threads','1','-vf',templates.crop_filter(1080,height),'-pix_fmt','yuv420p',
+             '-c:v','libx264','-crf','0','-preset','ultrafast','-tune','zerolatency','-threads','1','-bf','0',
+             '-c:a','pcm_s16le',str(target)],timeout=7200)
+        return target
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+
+
 def export(source, output, options, cues=(), watermark_path=None):
     start, end = options['start'], options['end']
     filters = []
-    template = options.get('template', {'id': 'none'})
+    template = dict(options.get('template', {'id': 'none'}))
+    watermark = options.get('watermark', {})
+    centered_brand = template['id'] == 'impact' and watermark.get('enabled') and watermark['type'] == 'text'
+    if centered_brand:
+        template.update(brand=watermark['text'], brand_opacity=watermark['opacity'])
     templated = template['id'] != 'none'
+    photo_path = Path(output).with_suffix('.photo.jpg')
+    if templated and not photo_path.is_file():
+        photo(source, start, end, photo_path)
     prefix = templates.filters(template, output, end-start) if templated else ''
     if templated:
         filters += ['null']
@@ -147,22 +171,21 @@ def export(source, output, options, cues=(), watermark_path=None):
         filters += ['scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2',
                     'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black', 'setsar=1']
     elif options['layout'] == 'crop':
-        filters += ['scale=1080:1920:force_original_aspect_ratio=increase:force_divisible_by=2',
-                    'crop=1080:1920', 'setsar=1']
+        filters += [templates.crop_filter(1080,1920)]
     else:
-        filters += ['scale=trunc(iw/2)*2:trunc(ih/2)*2', 'setsar=1']
+        filters += ["scale=w='min(1920,iw)':h='min(1920,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", 'setsar=1']
     subtitle = clip_srt(cues, start, end)
     if subtitle:
         # Relative, generated filename: no user-controlled path in filter syntax.
         Path(output).with_suffix('.srt').write_text(subtitle, encoding='utf-8')
         filters.append("subtitles=" + Path(output).with_suffix('.srt').name + ":force_style='FontName=DejaVu Sans,FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=55'")
-    watermark = options.get('watermark', {})
     logo = watermark.get('enabled') and watermark['type'] == 'logo'
-    if watermark.get('enabled'):
+    if watermark.get('enabled') and not centered_brand:
         width, height = 1080, 1920
         if options['layout'] == 'original' and not templated:
             info = probe(source)
-            width, height = info['width'] // 2 * 2, info['height'] // 2 * 2
+            factor=min(1,1920/max(info['width'],info['height']))
+            width, height = int(info['width']*factor)//2*2, int(info['height']*factor)//2*2
         margin_x, margin_y = max(2, round(width * .035)), max(2, round(height * .05))
         position = watermark['position']
         if logo:
@@ -173,7 +196,8 @@ def export(source, output, options, cues=(), watermark_path=None):
             logo_width = max(2, round(width * watermark['size'] / 100))
             logo_height = max(2, round(height * .25))
             input_label = '[templated]' if templated else '[0:v]'
-            complex_filter = (prefix + ';' if templated else '') + input_label + ','.join(filters) + '[base];[1:v]scale=' + str(logo_width) + ':' + str(logo_height) + ':force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=' + str(watermark['opacity']) + '[logo];[base][logo]overlay=x=' + x + ':y=' + y + ':shortest=1[out]'
+            logo_input = '2:v' if templated else '1:v'
+            complex_filter = (prefix + ';' if templated else '') + input_label + ','.join(filters) + '[base];[' + logo_input + ']scale=' + str(logo_width) + ':' + str(logo_height) + ':force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=' + str(watermark['opacity']) + '[logo];[base][logo]overlay=x=' + x + ':y=' + y + ':shortest=1[out]'
         else:
             textfile = Path(output).with_suffix('.watermark.txt')
             textfile.write_text(watermark['text'], encoding='utf-8')
@@ -181,24 +205,55 @@ def export(source, output, options, cues=(), watermark_path=None):
             x = str(margin_x) if position.endswith('left') else f'w-tw-{margin_x}'
             y = str(margin_y) if position.startswith('top') else f'h-th-{margin_y}'
             filters.append(f'drawtext=font=DejaVu Sans:textfile={textfile.name}:expansion=none:fontsize={fontsize}:fontcolor=white@{watermark["opacity"]}:shadowcolor=black@0.6:shadowx=1:shadowy=1:x={x}:y={y}')
+    normalized=prepare_top(source,output,options) if templated else None
     args = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
-            '-threads', '2', '-ss', str(start), '-i', str(Path(source).resolve())]
+            '-threads', '1', '-ss', '0' if templated else str(start), '-i', str(normalized.resolve() if normalized else Path(source).resolve())]
+    if templated:
+        for image in (Path(output).with_suffix('.template.png'),):
+            args += ['-threads', '1', '-framerate', '1', '-loop', '1', '-i', str(image.resolve())]
     if logo:
-        args += ['-loop', '1', '-i', str(Path(watermark_path).resolve())]
-    args += ['-t', str(end-start), '-sn', '-dn', '-map_metadata', '-1', '-filter_threads', '2']
+        args += ['-threads', '1', '-framerate', '1', '-loop', '1', '-i', str(Path(watermark_path).resolve())]
+    args += ['-t', str(end-start), '-sn', '-dn', '-map_metadata', '-1', '-filter_threads', '1']
     if logo:
-        args += ['-filter_complex_threads', '2', '-filter_complex', complex_filter, '-map', '[out]']
+        args += ['-filter_complex_threads', '1', '-filter_complex', complex_filter, '-map', '[out]']
     elif templated:
-        args += ['-filter_complex_threads', '2', '-filter_complex', prefix + ';[templated]' + ','.join(filters) + '[out]', '-map', '[out]']
+        args += ['-filter_complex_threads', '1', '-filter_complex', prefix + ';[templated]' + ','.join(filters) + '[out]', '-map', '[out]']
     else:
         args += ['-vf', ','.join(filters), '-map', '0:v:0']
     args += ['-map', '0:a:0?', '-r', '30',
-            '-c:v', 'libx264', '-preset', 'medium', '-crf', str(options['crf']),
-            '-pix_fmt', 'yuv420p', '-threads', '2', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000']
+            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-rc-lookahead', '0', '-bf', '0', '-crf', str(options['crf']),
+            '-pix_fmt', 'yuv420p', '-threads', '1', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000']
     if options['normalize']:
         args += ['-af', 'loudnorm=I=-16:TP=-1.5:LRA=11']
     args += ['-movflags', '+faststart', Path(output).name]
-    result = subprocess.run(args, cwd=Path(output).parent, capture_output=True, text=True, timeout=7200)
+    try:
+        result = subprocess.run(args, cwd=Path(output).parent, capture_output=True, text=True, timeout=7200)
+    finally:
+        if normalized:
+            normalized.unlink(missing_ok=True)
     if result.returncode:
         Path(output).unlink(missing_ok=True)
         raise ValueError('Falha ao exportar. ' + result.stderr[-1600:])
+
+
+def cover(video, target):
+    info = probe(video)
+    run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-threads', '1',
+         '-ss', str(min(info['duration']*.4, max(0, info['duration']-.05))), '-i', str(video),
+         '-frames:v', '1', '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
+         '-filter_threads', '1', '-threads', '1', '-q:v', '2', str(target)])
+
+
+def photo(source, start, end, target):
+    run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-threads', '1', '-ss', str(start+(end-start)*.5),
+         '-i', str(Path(source).resolve()), '-frames:v', '1', '-vf', 'scale=min(1920\\,iw):-2',
+         '-filter_threads', '1', '-threads', '1', '-q:v', '2', str(target)])
+
+
+def transcribe(source, start, end, target):
+    env = dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', HF_HUB_DISABLE_XET='1', HF_HUB_DOWNLOAD_TIMEOUT='120')
+    result = subprocess.run([sys.executable, '-m', 'studio.speech', str(Path(source).resolve()), str(start), str(end), str(target)],
+                            capture_output=True, text=True, timeout=1800, env=env)
+    if result.returncode:
+        raise ValueError('Não foi possível transcrever automaticamente. Verifique o acesso ao modelo de fala e tente novamente.')
+    return json.loads(Path(target).read_text())

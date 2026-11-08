@@ -1,13 +1,13 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { asset:null, preset:'tiktok', uploading:false, polling:false, submitting:false, previewing:false, lastJobs:'', editing:null, logo:null };
+const state = { asset:null, preset:'tiktok', uploading:false, polling:false, submitting:false, previewing:false, lastJobs:'', editing:null, logo:null, photo:null };
 const previewMode = Boolean(window.CRIA_PREVIEW);
 let toastTimer;
 function toast(message) { $('toast').textContent=message; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').hidden=true,6500); }
 async function api(path, options={}) {
   if (previewMode) return window.CRIA_PREVIEW.api(path,options);
   const response=await fetch(path,options); const data=await response.json();
-  if(response.status===401&&data.login)location.assign(data.login);
+  if(response.status===401&&data.login)requestSession();
   if (!response.ok) throw new Error(data.error || 'Falha na comunicação com o estúdio.');
   return data;
 }
@@ -15,10 +15,12 @@ function scrollToStudio() { $('workspace').scrollIntoView({behavior:document.doc
 function showTab(name) {
   const editor=name==='editor';
   $('editorPanel').hidden=!editor; $('templatesPanel').hidden=editor;
+  if(!editor)$('video').pause();
   $('editorNav').classList.toggle('active',editor);$('templatesNav').classList.toggle('active',!editor);
   for (const [id,selected] of [['tabEditor',editor],['tabTemplates',!editor]]) {
     $(id).setAttribute('aria-selected',String(selected)); $(id).tabIndex=selected?0:-1;
   }
+  document.dispatchEvent(new Event('studiochange'));
 }
 $('tabEditor').onclick=()=>showTab('editor'); $('tabTemplates').onclick=()=>showTab('templates');
 for (const id of ['tabEditor','tabTemplates']) $(id).addEventListener('keydown',event=>{
@@ -87,12 +89,12 @@ for(const id of ['watermarkEnabled','watermarkType','watermarkText','watermarkPo
 $('showGuide').onchange=()=>$('safeGuide').hidden=!$('showGuide').checked;
 function setBusy(busy){state.uploading=busy;$('videoFile').disabled=busy;$('selectVideo').disabled=busy;$('replaceVideo').disabled=busy;update();}
 function applyAsset(info){
-  state.asset=info;state.editing=null;state.previewing=false;$('video').pause();$('video').src=info.url;
+  state.asset=info;state.editing=null;state.previewing=false;state.photo=null;$('video').pause();$('video').src=info.url;
   $('dropzone').hidden=true;$('previewWrap').hidden=false;$('filename').textContent=info.name;
   $('videoInfo').textContent=`${info.width} × ${info.height} · ${Math.round(info.duration)} s`;
   $('start').value=0;$('end').value=info.duration.toFixed(3);
   for(const id of ['start','end','markStart','markEnd','previewSelection'])$(id).disabled=false;
-  $('subtitles').value='';$('srtFile').value='';$('publicationText').value='';update();
+  $('subtitles').value='';$('srtFile').value='';$('publicationText').value='';$('templateTitle').value='';$('templateHighlight').value='';$('clipTopic').value='';renderChoices(null);update();
 }
 function upload(file){
   if(!file||state.uploading)return;
@@ -135,11 +137,21 @@ function applyOptions(options){
   choosePreset(options.preset||'tiktok');
 }
 function publicationText(publication){return publication?[publication.caption,(publication.hashtags||[]).join(' ')].filter(Boolean).join('\n\n'):'';}
+function selectPublication(choice){
+  $('templateTitle').value=choice.title;$('templateHighlight').value=choice.highlight||'';$('publicationText').value=publicationText(choice);update();
+}
+function renderChoices(publication){
+  const container=$('publicationChoices');container.replaceChildren();
+  for(const [index,choice] of (publication?.choices||[]).entries()){
+    const button=element('button','publication-choice');button.type='button';button.append(element('small','',`OPÇÃO ${index+1}`),element('strong','',choice.title),element('span','',choice.caption.slice(0,180)));
+    button.onclick=()=>{selectPublication(choice);container.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b===button));};container.append(button);
+  }
+  if(!container.childElementCount)container.append(element('p','field-help',publication?.source||'As opções serão geradas a partir da fala do corte.'));
+}
 $('suggestPublication').onclick=async()=>{
   try{const response=await api('/api/suggest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(values())});
     if(!response.title)return toast(response.source);
-    if(!$('templateTitle').value.trim())$('templateTitle').value=response.title;
-    $('publicationText').value=publicationText(response);update();toast('Sugestão criada. Revise o texto e as hashtags antes de publicar.');
+    renderChoices(response);selectPublication(response);toast('Escolha uma das opções geradas a partir do corte.');
   }catch(error){toast(error.message);}
 };
 $('copyPublication').onclick=async()=>{
@@ -150,6 +162,8 @@ async function editJob(job,openTemplates=false){
   try{
     const info=await api('/api/assets/'+job.asset_id);applyAsset(info);applyOptions(job.options);
     state.editing=job.id;$('start').value=job.options.start;$('end').value=job.options.end;$('mode').value='single';$('subtitles').value=job.subtitles||'';
+    state.photo=job.photo||null;renderChoices(job.publication);
+    if(job.publication?.title&&!$('templateTitle').value.trim())selectPublication(job.publication);
     $('publicationText').value=publicationText(job.publication);$('editingLabel').textContent=`Editando ${job.name} · a nova versão preserva o corte anterior.`;
     showTab(openTemplates?'templates':'editor');update();scrollToStudio();
   }catch(error){toast(error.message);}
@@ -159,7 +173,7 @@ document.querySelectorAll('[data-template]').forEach(button=>button.onclick=()=>
   $('templateSelect').value=button.dataset.template;showTab('editor');update();scrollToStudio();
   toast(state.asset?'Template selecionado. Ajuste o título e exporte a nova versão.':'Template selecionado. Envie um vídeo para começar.');
 });
-$('savePreset').onclick=()=>{try{const {preset,layout,batch,length,crf,normalize,template}=values();localStorage.setItem('cria-preset-v1',JSON.stringify({preset,layout,batch,length,crf,normalize,template}));storeWatermark();toast('Padrão e marca d’água salvos neste navegador.');}catch{toast('Não foi possível salvar neste navegador.');}};
+$('savePreset').onclick=()=>{try{const {preset,layout,batch,length,crf,normalize,template}=values();localStorage.setItem('cria-preset-v1',JSON.stringify({preset,layout,batch,length,crf,normalize,template:{id:template.id}}));storeWatermark();toast('Padrão e marca d’água salvos neste navegador.');}catch{toast('Não foi possível salvar neste navegador.');}};
 try{
   const saved=JSON.parse(localStorage.getItem('cria-preset-v1')||'null');
   if(saved){applyOptions(saved);$('mode').value=saved.batch?'batch':'single';if(saved.length)$('length').value=saved.length;}
@@ -186,13 +200,15 @@ async function refreshJobs(){
       const card=element('article','job');card.dataset.status=job.status;card.append(element('h3','',job.name));
       card.append(element('p','',`${job.options.start.toFixed(1)} s → ${job.options.end.toFixed(1)} s · ${job.options.preset}`));
       const labels={queued:'◷ Na fila',processing:'◌ Exportando…',done:'✓ Pronto para baixar',error:'Falha na exportação',preview:'Prévia de corte · sem MP4 gerado'};
-      card.append(element('span','job-status '+(job.status==='error'?'error':''),labels[job.status]||job.status));
+      card.append(element('span','job-status '+(job.status==='error'?'error':''),job.status==='processing'&&job.stage?job.stage:labels[job.status]||job.status));
       if(job.status==='error')card.append(element('p','',job.error));
-      if(job.download){const video=element('video');video.controls=true;video.preload='none';video.src=job.download;card.append(video);const link=element('a','button secondary','↓ Baixar MP4');link.href=job.download;link.download='corte.mp4';card.append(link);}
+      if(job.download){const video=element('video');video.controls=true;video.preload='none';video.src=job.download;if(job.cover)video.poster=job.cover;card.append(video);const link=element('a','button secondary','↓ Baixar MP4');link.href=job.download;link.download='corte.mp4';card.append(link);}
+      if(job.photo){const photo=element('img','automatic-photo');photo.src=job.photo;photo.loading='lazy';photo.alt='Foto inferior extraída automaticamente do corte';card.append(photo,element('p','','Foto do template gerada automaticamente.'));}
+      for(const warning of job.warnings||[])card.append(element('p','job-warning',warning));
       if(job.asset_id&&['done','preview'].includes(job.status)){
         const actions=element('div','job-actions');const edit=element('button','button secondary','Editar corte');edit.onclick=()=>editJob(job);
         const template=element('button','button primary','Aplicar template');template.onclick=()=>editJob(job,true);actions.append(edit,template);card.append(actions);
-        if(job.publication?.caption){const details=element('details','publication-details');details.append(element('summary','','Legenda e hashtags sugeridas'));const text=element('textarea');text.rows=6;text.value=publicationText(job.publication);text.setAttribute('aria-label','Sugestão editável para '+job.name);details.append(text);card.append(details);}
+        if(job.publication?.choices?.length){const details=element('details','publication-details');details.open=true;details.append(element('summary','','Escolher título e legenda'));for(const choice of job.publication.choices){const pick=element('button','publication-choice',choice.title);pick.onclick=async()=>{await editJob(job);selectPublication(choice);};details.append(pick);}card.append(details);}
       }
       fragment.append(card);
     }$('jobs').replaceChildren(fragment);
@@ -202,10 +218,25 @@ choosePreset(state.preset);refreshJobs();setInterval(refreshJobs,2500);
 if(!previewMode){
   fetch('/api/auth/status',{cache:'no-store'}).then(r=>r.json()).then(status=>{
     $('logoutButton').hidden=!status.required;
-    if(status.required&&!status.authenticated)location.replace('/login');
+    if(status.required&&!status.authenticated)requestSession();
   }).catch(()=>{});
   $('logoutButton').onclick=async()=>{
     try{await api('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});location.replace('/login');}
     catch(error){toast(error.message);}
   };
 }
+function requestSession(){
+  const dialog=$('sessionDialog');
+  if(dialog.open)return;
+  dialog.showModal();
+  fetch('/api/auth/status',{cache:'no-store'}).then(r=>r.json()).then(data=>{if(data.authenticated){dialog.close();return;}$('sessionUsername').value=data.username||'studio';}).catch(()=>{});
+}
+$('sessionForm').onsubmit=async event=>{
+  event.preventDefault();$('sessionError').hidden=true;
+  try{
+    const response=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('sessionUsername').value,password:$('sessionPassword').value})});const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Não foi possível reconectar.');
+    const check=await fetch('/api/auth/status',{cache:'no-store'});if(!(await check.json()).authenticated)throw new Error('O navegador bloqueou a sessão. Abra o site em uma aba externa.');
+    $('sessionPassword').value='';$('sessionDialog').close();refreshJobs();toast('Conexão restaurada. Seu editor foi preservado.');
+  }catch(error){$('sessionError').textContent=error.message;$('sessionError').hidden=false;}
+};

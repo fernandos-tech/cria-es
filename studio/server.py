@@ -1,5 +1,6 @@
 """Single-user editing studio. Run: python3 -m studio.server"""
 import argparse
+import copy
 import json
 import mimetypes
 import os
@@ -40,11 +41,38 @@ def work(job_id, source, options, cues):
     with LOCK:
         JOBS[job_id]['status'] = 'processing'
     try:
+        warnings = []
+        if not cues and os.environ.get('AUTO_TRANSCRIBE', '1') == '1' and media.probe(source)['has_audio']:
+            with LOCK:
+                JOBS[job_id]['stage'] = 'Transcrevendo a fala para sugerir títulos e legendas…'
+            try:
+                cues = media.transcribe(source, options['start'], options['end'], DATA / 'exports' / (job_id+'.transcript.json'))
+            except (ValueError, TimeoutError) as error:
+                warnings.append(str(error))
+        publication = templates.suggestion(options['template']['topic'], cues, options['start'], options['end'], options['preset'])
+        selected = next((choice for choice in publication.get('choices', []) if choice['title'] == options['template']['title']), None)
+        if selected:
+            publication = dict(selected, choices=publication['choices'])
+        with LOCK:
+            JOBS[job_id].update(publication=publication, subtitles=media.clip_srt(cues, 0, 1e12), stage='Montando corte e foto automática…')
+        if options['template']['id'] != 'none' and not options['template']['title'].strip():
+            if publication['title']:
+                options['template'].update(title=publication['title'], highlight=publication.get('highlight', ''))
+            else:
+                with LOCK:
+                    JOBS[job_id]['requested_template'] = copy.deepcopy(options['template'])
+                options['template']['id'] = 'none'
+                warnings.append('O corte e a foto foram gerados sem o template porque não há fala reconhecida para criar o título. Aplique o template novamente após obter a transcrição.')
+        if not publication['title']:
+            publication['source'] = 'Não há fala transcrita disponível para sugerir título e legenda neste corte.'
+        media.photo(source, options['start'], options['end'], DATA / 'exports' / (job_id+'.photo.jpg'))
         wm = options.get('watermark', {})
         logo = DATA / 'watermarks' / (wm['logo_id'] + '.png') if wm.get('enabled') and wm['type'] == 'logo' else None
         media.export(source, DATA / 'exports' / (job_id + '.mp4'), options, cues, watermark_path=logo)
+        media.cover(DATA / 'exports' / (job_id + '.mp4'), DATA / 'exports' / (job_id + '.jpg'))
         with LOCK:
-            JOBS[job_id].update(status='done', download=f'/exports/{job_id}.mp4')
+            JOBS[job_id].update(status='done', download=f'/exports/{job_id}.mp4', cover=f'/covers/{job_id}.jpg',
+                               photo=f'/photos/{job_id}.jpg', warnings=warnings, stage='Concluído')
     except Exception as error:
         with LOCK:
             JOBS[job_id].update(status='error', error=str(error))
@@ -180,10 +208,6 @@ class Handler(BaseHTTPRequestHandler):
                             raise ValueError('Corte original não encontrado para edição.')
                 cues = media.parse_srt(raw.get('subtitles', ''))
                 publication = templates.suggestion(options['template']['topic'], cues, options['start'], options['end'], options['preset'])
-                if options['template']['id'] != 'none' and not options['template']['title'].strip():
-                    if not publication['title']:
-                        raise ValueError('Informe o título do template ou um tema para sugerir o título.')
-                    options['template']['title'] = publication['title']
                 ranges = [(options['start'], options['end'])]
                 if raw.get('batch'):
                     ranges = media.segments(options['start'], options['end'], raw.get('length', 30))
@@ -193,12 +217,13 @@ class Handler(BaseHTTPRequestHandler):
                     jobs = []
                     for index, (start, end) in enumerate(ranges):
                         job_id = uuid.uuid4().hex
-                        opts = dict(options, start=start, end=end)
+                        opts = dict(copy.deepcopy(options), start=start, end=end)
                         name = f'{parent["name"]} · nova versão' if parent_id else f'Corte {index+1:02}'
                         job = dict(id=job_id, name=name, status='queued', options=opts,
                                    asset_id=asset_id, parent_id=parent_id, subtitles=raw.get('subtitles', ''),
                                    publication=templates.suggestion(options['template']['topic'], cues, start, end, options['preset']))
                         JOBS[job_id] = job
+                        save_json(DATA / 'exports' / (job_id + '.json'), job)
                         jobs.append(dict(job))
                         POOL.submit(work, job_id, DATA / 'uploads' / (asset_id + '.media'), opts, cues)
                 return self.json({'jobs': jobs}, 202)
@@ -303,9 +328,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.file(DATA / 'uploads' / (asset_id + '.media'), content_type=content_type)
             if path.startswith('/exports/') and path.endswith('.mp4'):
                 return self.file(DATA / 'exports' / (identifier(path[9:-4]) + '.mp4'), download=True)
+            if path.startswith('/covers/') and path.endswith('.jpg'):
+                return self.file(DATA / 'exports' / (identifier(path[8:-4]) + '.jpg'))
+            if path.startswith('/photos/') and path.endswith('.jpg'):
+                return self.file(DATA / 'exports' / (identifier(path[8:-4]) + '.photo.jpg'))
             static = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css',
                       '/motion.js': 'motion.js', '/fonts/space-grotesk-latin.woff2': 'fonts/space-grotesk-latin.woff2'}
             static['/template-render.js'] = 'template-render.js'
+            static['/fonts/Montserrat.ttf'] = 'fonts/Montserrat.ttf'
             if path in static:
                 return self.file(ROOT / 'web' / static[path])
             self.json({'error': 'Não encontrado.'}, 404)
@@ -375,8 +405,13 @@ def main():
         parser.error('Instale FFmpeg e ffprobe antes de iniciar.')
     for name in ('uploads', 'exports', 'watermarks'):
         (DATA / name).mkdir(parents=True, exist_ok=True)
+    AUTH.attach_storage(DATA / '.sessions.json')
     for path in (DATA / 'exports').glob('*.json'):
+        if not re.fullmatch(r'[a-f0-9]{32}', path.stem):
+            continue
         job = json.loads(path.read_text())
+        if job['status'] in ('queued', 'processing', 'transcribing'):
+            job.update(status='error', error='O serviço reiniciou durante este processamento. Gere novamente a partir do vídeo original.')
         JOBS[job['id']] = job
     print(f'Cria Studio iniciado na porta {args.port}', flush=True)
     ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

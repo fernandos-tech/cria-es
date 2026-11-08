@@ -4,6 +4,9 @@ import hmac
 import secrets
 import threading
 import time
+import json
+import os
+from pathlib import Path
 
 
 class InvalidCredentials(Exception):
@@ -22,6 +25,30 @@ class Sessions:
         self.sessions = {}
         self.failures = {}
         self.lock = threading.Lock()
+        self.storage = None
+
+    def attach_storage(self, path):
+        self.storage = Path(path)
+        with self.lock:
+            try:
+                stored = json.loads(self.storage.read_text())
+                if hmac.compare_digest(stored.get('owner', ''), self.owner_fingerprint()):
+                    now = time.time()
+                    self.sessions = {key: end for key, end in stored.get('sessions', {}).items() if end > now}
+            except (OSError, ValueError, TypeError):
+                pass
+
+    def owner_fingerprint(self):
+        return hmac.new(self.password.encode(), ('cria-owner:'+self.username).encode(), hashlib.sha256).hexdigest()
+
+    def persist(self):
+        if self.storage is None:
+            return
+        temporary = self.storage.with_suffix('.tmp')
+        with temporary.open('w', encoding='utf-8') as stream:
+            os.chmod(temporary, 0o600)
+            json.dump({'owner': self.owner_fingerprint(), 'sessions': self.sessions}, stream)
+        temporary.replace(self.storage)
 
     @property
     def required(self):
@@ -40,7 +67,7 @@ class Sessions:
     def login(self, username, password, client):
         now = time.monotonic()
         with self.lock:
-            self.sessions = {key: end for key, end in self.sessions.items() if end > now}
+            self.sessions = {key: end for key, end in self.sessions.items() if end > time.time()}
             self.failures = {key: (count, end) for key, (count, end) in self.failures.items() if end > now}
             count, end = self.failures.get(client, (0, now+60))
             if count >= 6:
@@ -52,15 +79,17 @@ class Sessions:
             if len(self.sessions) >= 256:
                 self.sessions.pop(next(iter(self.sessions)))
             token = secrets.token_urlsafe(32)
-            self.sessions[self.digest(token)] = now+self.lifetime
+            self.sessions[self.digest(token)] = time.time()+self.lifetime
+            self.persist()
             return token
 
     def valid(self, token):
         if not token or len(token) > 128:
             return False
         with self.lock:
-            return self.sessions.get(self.digest(token), 0) > time.monotonic()
+            return self.sessions.get(self.digest(token), 0) > time.time()
 
     def logout(self, token):
         with self.lock:
             self.sessions.pop(self.digest(token), None)
+            self.persist()

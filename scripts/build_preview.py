@@ -13,6 +13,8 @@ def build():
     font = base64.b64encode((WEB / 'fonts' / 'space-grotesk-latin.woff2').read_bytes()).decode()
     css = css.replace("url('/fonts/space-grotesk-latin.woff2')", f"url('data:font/woff2;base64,{font}')")
     css += '\n.preview-banner{padding:12px 16px;border:1px solid #537438;background:#192810;border-radius:8px;margin:20px 0 0;color:#c9e5b4;font-size:12px}.preview-banner strong{color:#c1ff61}.preview-banner span{color:#9db28d}\n'
+    title_font = base64.b64encode((WEB / 'fonts' / 'Montserrat.ttf').read_bytes()).decode()
+    css = css.replace("url('/fonts/Montserrat.ttf')", f"url('data:font/ttf;base64,{title_font}')")
     app = (WEB / 'app.js').read_text()
     html = re.sub(r'<link rel="preload"[^>]+>', '', html)
     html = html.replace('<link rel="stylesheet" href="/style.css">', '<style>' + css + '</style>')
@@ -25,8 +27,9 @@ def build():
     html = html.replace('Processamento local<p>Seus vídeos são processados neste ambiente, sem APIs externas.</p>', 'Prévia local<p>Vídeos abertos apenas neste navegador. Exportações disponíveis na aplicação com servidor.</p>')
     scripts = (ROOT / 'scripts' / 'preview-adapter.js').read_text() + '\n' + app + '\n' + (WEB / 'template-render.js').read_text() + '\n' + (WEB / 'motion.js').read_text()
     html = html.replace('</body>', '<script>' + scripts.replace('</script', '<\\/script') + '</script>\n</body>')
-    license_text = (WEB / 'fonts' / 'OFL.txt').read_text().replace('--', '—')
-    html += '\n<!-- Space Grotesk font license:\n' + license_text + '\n-->\n'
+    for name, license_file in [('Space Grotesk', 'OFL.txt'), ('Montserrat', 'Montserrat-OFL.txt')]:
+        license_text = '\n'.join(line.rstrip() for line in (WEB / 'fonts' / license_file).read_text().splitlines()).replace('--', '—')
+        html += '\n<!-- ' + name + ' font license:\n' + license_text + '\n-->\n'
     target = ROOT / 'preview.html'
     target.write_text(html)
     print(f'{target}: {target.stat().st_size} bytes')
