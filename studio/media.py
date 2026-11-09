@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import os
+import hashlib
 from pathlib import Path
 from . import templates
 
@@ -24,7 +25,15 @@ def probe(path):
     duration = float(data.get('format', {}).get('duration', video.get('duration', 0)))
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError('Não foi possível determinar a duração do vídeo.')
-    return dict(duration=duration, width=video['width'], height=video['height'],
+    width, height = video['width'], video['height']
+    rotation = next((side.get('rotation', 0) for side in video.get('side_data_list', [])
+                     if side.get('side_data_type') == 'Display Matrix'), video.get('tags', {}).get('rotate', 0))
+    try:
+        if abs(float(rotation) % 180 - 90) < 1:
+            width, height = height, width
+    except (ValueError, TypeError):
+        pass
+    return dict(duration=duration, width=width, height=height,
                 has_audio=any(s['codec_type'] == 'audio' for s in data['streams']))
 
 
@@ -51,9 +60,12 @@ def settings(raw, duration):
         raise ValueError('Preset inválido.')
     crf = number(raw.get('crf', 18), 'Qualidade CRF', 16, 28)
     watermark = watermark_settings(raw.get('watermark', {}))
+    template = templates.settings(raw.get('template', {}))
+    if watermark['enabled'] and watermark['position'] == 'title' and (template['id'] != 'impact' or watermark['type'] != 'text'):
+        raise ValueError('A posição abaixo do título exige texto e o template Referência 1.')
     return dict(start=start, end=end, layout=layout, preset=preset, crf=int(crf),
                 normalize=bool(raw.get('normalize', True)), watermark=watermark,
-                template=templates.settings(raw.get('template', {})))
+                template=template)
 
 
 def watermark_settings(raw):
@@ -62,7 +74,7 @@ def watermark_settings(raw):
     enabled = bool(raw.get('enabled', False))
     kind = raw.get('type', 'text')
     position = raw.get('position', 'top-right')
-    if kind not in ('text', 'logo') or position not in ('top-left', 'top-right', 'bottom-left', 'bottom-right'):
+    if kind not in ('text', 'logo') or position not in ('top-left', 'top-right', 'bottom-left', 'bottom-right', 'custom', 'title'):
         raise ValueError('Tipo ou posição da marca d’água inválido.')
     text = raw.get('text', '')
     if not isinstance(text, str) or len(text) > 80 or any(ord(c) < 32 for c in text):
@@ -73,6 +85,8 @@ def watermark_settings(raw):
     if enabled and ((kind == 'text' and not text.strip()) or (kind == 'logo' and not logo_id)):
         raise ValueError('Digite o texto ou envie o logo para ativar a marca d’água.')
     return dict(enabled=enabled, type=kind, position=position, text=text, logo_id=logo_id,
+                x=number(raw.get('x', 50), 'Posição horizontal', 0, 100),
+                y=number(raw.get('y', 50), 'Posição vertical', 0, 100),
                 opacity=number(raw.get('opacity', .8), 'Opacidade', .1, 1),
                 size=number(raw.get('size', 4 if kind == 'text' else 20), 'Tamanho', 2, 30))
 
@@ -157,14 +171,16 @@ def export(source, output, options, cues=(), watermark_path=None):
     filters = []
     template = dict(options.get('template', {'id': 'none'}))
     watermark = options.get('watermark', {})
-    centered_brand = template['id'] == 'impact' and watermark.get('enabled') and watermark['type'] == 'text'
+    centered_brand = template['id'] == 'impact' and watermark.get('enabled') and watermark['type'] == 'text' and watermark['position'] == 'title'
     if centered_brand:
         template.update(brand=watermark['text'], brand_opacity=watermark['opacity'])
     templated = template['id'] != 'none'
     photo_path = Path(output).with_suffix('.photo.jpg')
     if templated and not photo_path.is_file():
         photo(source, start, end, photo_path)
-    prefix = templates.filters(template, output, end-start) if templated else ''
+    info = probe(source) if templated or options['layout'] == 'original' else None
+    direct = templated and info['width'] * info['height'] <= 1920 * 1080
+    prefix = templates.filters(template, output, end-start, direct=direct) if templated else ''
     if templated:
         filters += ['null']
     elif options['layout'] == 'fit':
@@ -183,7 +199,6 @@ def export(source, output, options, cues=(), watermark_path=None):
     if watermark.get('enabled') and not centered_brand:
         width, height = 1080, 1920
         if options['layout'] == 'original' and not templated:
-            info = probe(source)
             factor=min(1,1920/max(info['width'],info['height']))
             width, height = int(info['width']*factor)//2*2, int(info['height']*factor)//2*2
         margin_x, margin_y = max(2, round(width * .035)), max(2, round(height * .05))
@@ -193,6 +208,8 @@ def export(source, output, options, cues=(), watermark_path=None):
                 raise ValueError('Logo não encontrado. Envie o arquivo novamente.')
             x = str(margin_x) if position.endswith('left') else f'W-w-{margin_x}'
             y = str(margin_y) if position.startswith('top') else f'H-h-{margin_y}'
+            if position == 'custom':
+                x, y = f'(W-w)*{watermark["x"]/100}', f'(H-h)*{watermark["y"]/100}'
             logo_width = max(2, round(width * watermark['size'] / 100))
             logo_height = max(2, round(height * .25))
             input_label = '[templated]' if templated else '[0:v]'
@@ -204,10 +221,12 @@ def export(source, output, options, cues=(), watermark_path=None):
             fontsize = max(6, min(round(height * watermark['size'] / 100), round(width * .84 / max(1, len(watermark['text'])) / .65)))
             x = str(margin_x) if position.endswith('left') else f'w-tw-{margin_x}'
             y = str(margin_y) if position.startswith('top') else f'h-th-{margin_y}'
+            if position == 'custom':
+                x, y = f'(w-tw)*{watermark["x"]/100}', f'(h-th)*{watermark["y"]/100}'
             filters.append(f'drawtext=font=DejaVu Sans:textfile={textfile.name}:expansion=none:fontsize={fontsize}:fontcolor=white@{watermark["opacity"]}:shadowcolor=black@0.6:shadowx=1:shadowy=1:x={x}:y={y}')
-    normalized=prepare_top(source,output,options) if templated else None
+    normalized=prepare_top(source,output,options) if templated and not direct else None
     args = ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
-            '-threads', '1', '-ss', '0' if templated else str(start), '-i', str(normalized.resolve() if normalized else Path(source).resolve())]
+            '-threads', '1', '-ss', '0' if normalized else str(start), '-i', str(normalized.resolve() if normalized else Path(source).resolve())]
     if templated:
         for image in (Path(output).with_suffix('.template.png'),):
             args += ['-threads', '1', '-framerate', '1', '-loop', '1', '-i', str(image.resolve())]
@@ -240,7 +259,7 @@ def cover(video, target):
     info = probe(video)
     run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-threads', '1',
          '-ss', str(min(info['duration']*.4, max(0, info['duration']-.05))), '-i', str(video),
-         '-frames:v', '1', '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2',
+         '-frames:v', '1', '-vf', 'scale=360:640:force_original_aspect_ratio=decrease,pad=360:640:(ow-iw)/2:(oh-ih)/2',
          '-filter_threads', '1', '-threads', '1', '-q:v', '2', str(target)])
 
 
@@ -251,9 +270,32 @@ def photo(source, start, end, target):
 
 
 def transcribe(source, start, end, target):
+    source = Path(source).resolve()
+    stat = source.stat()
+    key = hashlib.sha256(json.dumps([str(source), stat.st_size, stat.st_mtime_ns, float(start), float(end),
+                                    os.environ.get('STUDIO_WHISPER_MODEL', 'tiny'), 'pt-v1']).encode()).hexdigest()
+    cache_dir = source.parent / 'transcripts'
+    cache = cache_dir / (key + '.json')
+    try:
+        cues = json.loads(cache.read_text())
+        if not isinstance(cues, list) or any(not isinstance(c, list) or len(c) != 3 or
+                not isinstance(c[2], str) or not all(isinstance(t, (int, float)) and math.isfinite(t) for t in c[:2]) or
+                c[1] <= c[0] for c in cues):
+            raise ValueError('Cache inválido.')
+        return cues
+    except (OSError, ValueError, TypeError):
+        pass
     env = dict(os.environ, OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', HF_HUB_DISABLE_XET='1', HF_HUB_DOWNLOAD_TIMEOUT='120')
-    result = subprocess.run([sys.executable, '-m', 'studio.speech', str(Path(source).resolve()), str(start), str(end), str(target)],
-                            capture_output=True, text=True, timeout=1800, env=env)
+    try:
+        result = subprocess.run([sys.executable, '-m', 'studio.speech', str(source), str(start), str(end), str(target)],
+                                capture_output=True, text=True, timeout=1800, env=env)
+    except subprocess.TimeoutExpired:
+        raise ValueError('A transcrição demorou demais. O corte será gerado; tente a transcrição novamente depois.') from None
     if result.returncode:
         raise ValueError('Não foi possível transcrever automaticamente. Verifique o acesso ao modelo de fala e tente novamente.')
-    return json.loads(Path(target).read_text())
+    cues = json.loads(Path(target).read_text())
+    cache_dir.mkdir(exist_ok=True)
+    temporary = cache.with_suffix('.tmp')
+    temporary.write_text(json.dumps(cues, ensure_ascii=False))
+    temporary.replace(cache)
+    return cues

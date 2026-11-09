@@ -41,7 +41,7 @@ function choosePreset(name) {
 document.querySelectorAll('[data-preset]').forEach(button=>button.onclick=()=>choosePreset(button.dataset.preset));
 function watermarkValues() {
   return {enabled:$('watermarkEnabled').checked,type:$('watermarkType').value,text:$('watermarkText').value,
-    logo_id:state.logo?.id||'',position:$('watermarkPosition').value,opacity:Number($('watermarkOpacity').value)/100,size:Number($('watermarkSize').value)};
+    logo_id:state.logo?.id||'',position:$('watermarkPosition').value,x:Number($('watermarkX').value),y:Number($('watermarkY').value),opacity:Number($('watermarkOpacity').value)/100,size:Number($('watermarkSize').value)};
 }
 function values() {
   return {asset_id:state.asset?.id,reedit_of:state.editing,preset:state.preset,start:Number($('start').value),end:Number($('end').value),
@@ -49,6 +49,9 @@ function values() {
     subtitles:$('subtitles').value,watermark:watermarkValues(),template:{id:$('templateSelect').value,title:$('templateTitle').value,highlight:$('templateHighlight').value,topic:$('clipTopic').value}};
 }
 function update() {
+  const titleAllowed=$('templateSelect').value==='impact'&&$('watermarkType').value==='text';
+  $('watermarkPosition').querySelector('[value=title]').disabled=!titleAllowed;
+  if($('watermarkPosition').value==='title'&&!titleAllowed)$('watermarkPosition').value='top-right';
   const options=values(),duration=Math.max(0,options.end-options.start),wm=options.watermark;
   $('selectedDuration').textContent=duration.toLocaleString('pt-BR',{maximumFractionDigits:1})+' s selecionados';
   $('lengthField').hidden=!options.batch; $('batchHelp').hidden=!options.batch;
@@ -60,12 +63,8 @@ function update() {
   $('templateFields').hidden=options.template.id==='none';
   $('watermarkFields').hidden=!wm.enabled; $('watermarkTextField').hidden=wm.type!=='text'; $('watermarkLogoField').hidden=wm.type!=='logo';
   $('watermarkOpacityValue').textContent=Math.round(wm.opacity*100)+'%'; $('watermarkSizeValue').textContent=wm.size+'%';
-  const overlay=$('watermarkPreview');
-  overlay.hidden=!state.asset||!wm.enabled||options.template.id!=='none'; overlay.dataset.position=wm.position; overlay.style.opacity=wm.opacity;
-  $('watermarkTextPreview').textContent=wm.type==='text'?wm.text:'';
-  $('watermarkTextPreview').style.fontSize=Math.max(10,Math.min(30,wm.size*3))+'px';
-  $('watermarkLogoPreview').hidden=wm.type!=='logo'||!state.logo;
-  if(state.logo){$('watermarkLogoPreview').src=state.logo.url;$('watermarkLogoPreview').style.width=(wm.size*3)+'px';}
+  $('watermarkCoordinates').hidden=wm.position!=='custom';
+  $('watermarkXValue').textContent=wm.x.toFixed(1)+'%';$('watermarkYValue').textContent=wm.y.toFixed(1)+'%';
   if(state.asset){
     $('timelineSelection').style.left=Math.max(0,Math.min(100,options.start/state.asset.duration*100))+'%';
     $('timelineSelection').style.right=Math.max(0,Math.min(100,100-options.end/state.asset.duration*100))+'%';
@@ -74,7 +73,7 @@ function update() {
 }
 function applyWatermark(wm={},logo=null) {
   $('watermarkEnabled').checked=Boolean(wm.enabled); $('watermarkType').value=wm.type||'text'; $('watermarkText').value=wm.text||'';
-  $('watermarkPosition').value=wm.position||'top-right'; $('watermarkOpacity').value=Math.round((wm.opacity??.8)*100); $('watermarkSize').value=wm.size??4;
+  $('watermarkPosition').value=wm.position||'top-right';$('watermarkX').value=wm.x??50;$('watermarkY').value=wm.y??50; $('watermarkOpacity').value=Math.round((wm.opacity??.8)*100); $('watermarkSize').value=wm.size??4;
   state.logo=logo||(wm.logo_id?(previewMode?window.CRIA_PREVIEW.getLogo(wm.logo_id):{id:wm.logo_id,url:'/watermarks/'+wm.logo_id+'.png'}):null);
   $('watermarkFileStatus').textContent=state.logo?'Logo carregado. Será aplicado a todos os cortes.':'PNG transparente preserva o fundo do vídeo.';
 }
@@ -82,7 +81,7 @@ function storeWatermark() {
   try { const wm=watermarkValues(); if(previewMode&&wm.type==='logo'){wm.enabled=false;wm.logo_id='';} localStorage.setItem('cria-watermark-v1',JSON.stringify(wm)); } catch { /* Optional storage. */ }
 }
 for(const id of ['start','end','layout','mode','length','crf','normalize','templateSelect','templateTitle','templateHighlight','clipTopic']) $(id).addEventListener('input',update);
-for(const id of ['watermarkEnabled','watermarkType','watermarkText','watermarkPosition','watermarkOpacity','watermarkSize']) $(id).addEventListener('input',()=>{
+for(const id of ['watermarkEnabled','watermarkType','watermarkText','watermarkPosition','watermarkOpacity','watermarkSize','watermarkX','watermarkY']) $(id).addEventListener('input',()=>{
   if(id==='watermarkType') $('watermarkSize').value=$('watermarkType').value==='logo'?20:4;
   update();storeWatermark();
 });

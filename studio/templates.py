@@ -99,12 +99,18 @@ def overlay(template,path,photo_path=None):
             color=(255,220,0,255) if not red and normalize(word.strip(' ,.?!')) in highlights else (255,255,255,255)
             draw.text((x,y),word,font=f,fill=color,anchor='lt',stroke_width=0);x+=f.getlength(word)
     if template.get('brand') and template['id']=='impact':
-        small=font(28);brand=template['brand'];x=(1080-small.getlength(brand))/2;y=center+len(lines)*line_height/2+9
-        draw.text((x,y),brand,font=small,fill=(245,245,245,round(255*template.get('brand_opacity',1))),anchor='lt',stroke_width=1,stroke_fill=(0,0,0,255))
+        brand_layer=Image.new('RGBA',image.size);draw=ImageDraw.Draw(brand_layer)
+        brand=template['brand'];brand_size=28;small=font(brand_size)
+        while small.getlength(brand)>940 and brand_size>10:
+            brand_size-=1;small=font(brand_size)
+        alpha=round(255*template.get('brand_opacity',1))
+        x=(1080-small.getlength(brand))/2;y=center+len(lines)*line_height/2+9
+        draw.text((x,y),brand,font=small,fill=(245,245,245,alpha),anchor='lt',stroke_width=1,stroke_fill=(0,0,0,alpha))
         for icon_x in (x-28,x+small.getlength(brand)+8):
-            draw.ellipse((icon_x,y+2,icon_x+20,y+22),fill=(255,255,255,255))
-            draw.rounded_rectangle((icon_x+3,y+7,icon_x+17,y+17),radius=2,fill=(255,0,10,255))
-            draw.polygon([(icon_x+8,y+9),(icon_x+8,y+15),(icon_x+13,y+12)],fill='white')
+            draw.ellipse((icon_x,y+2,icon_x+20,y+22),fill=(255,255,255,alpha))
+            draw.rounded_rectangle((icon_x+3,y+7,icon_x+17,y+17),radius=2,fill=(255,0,10,alpha))
+            draw.polygon([(icon_x+8,y+9),(icon_x+8,y+15),(icon_x+13,y+12)],fill=(255,255,255,alpha))
+        image.alpha_composite(brand_layer)
     if photo_path is not None:
         background=Image.new('RGBA',(1080,1920))
         with Image.open(photo_path) as source:
@@ -129,9 +135,11 @@ def crop_filter(width,height,focus=.5,zoom=1):
     return f"crop=w='trunc(min(iw,ih*{ratio})/{zoom}/2)*2':h='trunc(min(ih,iw/{ratio})/{zoom}/2)*2':x=(iw-ow)*{focus}:y=(ih-oh)*0.5,scale={width}:{height},setsar=1,fps=30"
 
 
-def filters(template,output,duration):
+def filters(template,output,duration,direct=False):
     y=84 if template['id']=='red' else 0
-    graph=[f'[0:v]pad=1080:1920:0:{y}:black[composition]',
+    height=900 if template['id']=='red' else 960
+    source=crop_filter(1080,height)+',' if direct else ''
+    graph=[f'[0:v]{source}pad=1080:1920:0:{y}:black[composition]',
            '[composition][1:v]overlay=0:0:shortest=1,format=yuv420p[templated]']
     result=subprocess.run([sys.executable,str(Path(__file__).resolve()),str(Path(output).with_suffix('.template.png').resolve()),str(Path(output).with_suffix('.photo.jpg').resolve())],
                           input=json.dumps(template,ensure_ascii=False),capture_output=True,text=True,timeout=60)

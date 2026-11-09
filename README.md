@@ -57,7 +57,7 @@ O arquivo exportado contém o enquadramento, título, legendas e marca d’água
 
 ## Templates, marca d’água e publicação
 
-- **Referência 1:** vídeo superior, faixa preta em degradê, título Montserrat Black branco/amarelo e foto fixa inferior. Quando ativada como texto, a marca aparece abaixo do título, com os ícones do modelo.
+- **Referência 1:** vídeo superior, faixa preta em degradê, título Montserrat Black branco/amarelo e foto fixa inferior. A posição “Abaixo do título” coloca a marca de texto com os ícones do modelo; outras posições são respeitadas.
 - **Referência 2:** vídeo superior, título branco/amarelo e foto inferior dividida em dois enquadramentos.
 - **Referência 3:** dois planos com margens pretas, faixa vermelha com contorno irregular de papel rasgado e título branco.
 
@@ -70,7 +70,12 @@ A composição segue as referências; o conteúdo vem do vídeo enviado e da sua
 16 megapixels. Posição, opacidade e tamanho são configuráveis e ficam salvos no navegador.
 A marca é aplicada em cada corte do lote. PNG transparente preserva o fundo.
 Logos enviados ficam em `.studio/watermarks`; sua referência é reaproveitada no servidor.
-A prévia de posição é aproximada no enquadramento padrão; confira o MP4 final.
+Escolha **Livre · arrastar na prévia** para mover a marca por mouse ou toque. Os controles
+horizontal e vertical também funcionam pelo teclado. Coordenadas de 0% a 100% percorrem
+o espaço disponível, mantendo a marca inteira no quadro; a posição fica salva e é reaplicada
+a cada corte e na reedição. Os quatro cantos continuam disponíveis. No template Referência 1,
+a posição **Abaixo do título** é uma escolha explícita para texto. A prévia mostra o
+enquadramento final também quando há marca sem template; confira o MP4 final.
 
 ### Títulos, legenda para publicação e hashtags automáticos
 
@@ -79,6 +84,10 @@ transcrição roda em um processo isolado que termina antes da renderização. O
 corte com fala baixa o modelo público de Hugging Face; o cache fica em `STUDIO_MODEL_DIR`
 (`/data/models` no Docker, `.studio/models` no ambiente local). Não exige chave de API.
 A primeira execução pode demorar; o progresso aparece no cartão do corte.
+Transcrições concluídas ficam em cache pelo arquivo original, intervalo e modelo.
+Exportar novamente o mesmo trecho reaproveita o resultado, inclusive após reiniciar.
+Uma troca de fonte, intervalo ou modelo produz uma nova transcrição. O cache fica na
+subpasta `transcripts` do diretório de uploads, protegido pelo login e ignorado pelo Git.
 
 Após concluir, o cartão oferece opções extraídas das frases reconhecidas. Escolha uma
 para preencher título, destaque, legenda e hashtags. Não é necessário digitar um título;
@@ -152,13 +161,20 @@ verificação atual dos limites de publicação das plataformas. A duração é 
 
 ## Recursos e validação
 
-A exportação usa um trabalhador por vez. Templates são montados em duas etapas com um
-intermediário H.264 sem perdas, que é apagado após o uso. A fonte é recortada antes de
-redimensionar; imagens estáticas e o codificador usam uma thread e buffers reduzidos.
+A exportação usa um trabalhador por vez. Fontes com até 1920 × 1080 pixels (ou área
+equivalente em vertical) usam uma única codificação nos templates. Fontes maiores usam
+duas etapas com intermediário H.264 sem perdas, apagado após o uso, para controlar a
+memória. A fonte é recortada antes de redimensionar; imagens estáticas e o codificador
+usam uma thread e buffers reduzidos. Resolução, 30 fps e CRF selecionado são preservados.
 O modo de proporção original limita o maior lado a 1920 pixels para o serviço de memória limitada.
 Os gráficos dos títulos são gerados em processo isolado; o servidor não retém essa memória.
 
-Cada corte salva automaticamente sua foto inferior e uma capa JPEG. Sessões são persistidas
+Cada corte salva automaticamente sua foto inferior e uma capa JPEG de prévia em 360 × 640.
+A foto usada dentro do template continua sendo extraída em até 1920 pixels de largura;
+a miniatura menor não reduz a qualidade do MP4. Se a transcrição exceder o tempo limite,
+o corte prossegue com aviso em vez de ser perdido.
+
+Sessões são persistidas
 com identificadores em hash e arquivo privado em `.studio/.sessions.json`. Trocar senha ou
 usuário invalida as sessões anteriores. Trabalhos interrompidos são identificados como erro
 no reinício, sem confundir arquivos de transcrição com metadados de exportação. No plano

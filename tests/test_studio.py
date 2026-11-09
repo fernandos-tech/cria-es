@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from studio import media, templates, auth
 
@@ -42,13 +43,45 @@ class EditingRules(unittest.TestCase):
             self.assertTrue(option['title']);self.assertIn('#reels',option['hashtags'])
         self.assertEqual(templates.choices('',[],0,2,'reels'),[])
     def test_watermark_validation_and_title_suggestions(self):
-        for wm in ({'enabled':True,'text':''},{'position':'somewhere'},{'opacity':float('nan')},{'text':'a\nb'}):
+        for wm in ({'enabled':True,'text':''},{'position':'somewhere'},{'opacity':float('nan')},{'text':'a\nb'},
+                   {'position':'custom','x':-1},{'position':'custom','y':101},{'x':float('inf')}):
             with self.subTest(wm=wm),self.assertRaises(ValueError):media.watermark_settings(wm)
         response=templates.suggestion('Perfumes e aromas',[(0,1,'Um aroma cítrico.'),(5,6,'Trecho fora do corte.')],0,2,'reels')
         self.assertIn('cítrico',response['caption'])
         self.assertNotIn('fora do corte',response['caption'])
         self.assertIn('#perfumes',response['hashtags'])
         self.assertEqual(templates.suggestion('',[],0,1,'shorts')['title'],'')
+
+    def test_transcription_cache_and_timeout_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory)/'source.media';source.write_bytes(b'fixture')
+            target=Path(directory)/'result.json';cues=[[1,2,'Fala do corte.']]
+            def recognize(*args,**kwargs):
+                target.write_text(json.dumps(cues));return subprocess.CompletedProcess([],0)
+            with patch.object(media.subprocess,'run',side_effect=recognize) as speech:
+                self.assertEqual(media.transcribe(source,0.0,3.0,target),cues)
+                target.unlink()
+                self.assertEqual(media.transcribe(source,0,3,target),cues)
+                self.assertEqual(speech.call_count,1)
+                self.assertFalse(target.exists())
+                media.transcribe(source,1,3,target);self.assertEqual(speech.call_count,2)
+                with patch.dict(os.environ,STUDIO_WHISPER_MODEL='other'):
+                    media.transcribe(source,0,3,target);self.assertEqual(speech.call_count,3)
+            with patch.object(media.subprocess,'run',side_effect=subprocess.TimeoutExpired('speech',1800)):
+                with self.assertRaisesRegex(ValueError,'demorou demais'):media.transcribe(source,0,4,target)
+
+    def test_title_brand_opacity_blends_over_the_band(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as directory:
+            target=Path(directory)/'brand.png'
+            template=dict(id='impact',title='TITULO',highlight='',brand='@MARCA',brand_opacity=.2)
+            templates.overlay(template,target)
+            icon_x=(1080-templates.font(28).getlength('@MARCA'))/2-28
+            y=960+round(82*1.08)/2+9
+            with Image.open(target) as image:
+                pixel=image.getpixel((round(icon_x+10),int(y+5)))
+                self.assertEqual(pixel[3],255)
+                self.assertGreater(min(pixel[:3]),30);self.assertLess(max(pixel[:3]),80)
 
     def test_invalid_ranges_and_numbers(self):
         for raw in ({'end': 0}, {'start': -1}, {'end': 99}, {'start': float('nan')}, {'layout': 'unknown'}):
@@ -70,6 +103,57 @@ class EditingRules(unittest.TestCase):
 
 
 class FullWorkflow(unittest.TestCase):
+    def test_free_watermark_position_in_plain_and_templated_export(self):
+        from PIL import Image, ImageChops
+        source=self.directory/'watermark-blue.mp4';logo=self.directory/'watermark-red.png'
+        media.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=30','-t','0.4','-c:v','libx264','-threads','1',str(source)])
+        Image.new('RGB',(80,40),(255,0,0)).save(logo)
+        for template,x,y in [('none',0,0),('none',100,100),('impact',37,62)]:
+            with self.subTest(template=template,x=x,y=y):
+                target=self.directory/f'free-{template}-{x}.mp4'
+                options=media.settings(dict(end=.4,layout='original',template=dict(id=template,title='TESTE DE POSIÇÃO'),
+                    watermark=dict(enabled=True,type='logo',logo_id='a'*32,position='custom',x=x,y=y,size=20,opacity=1)),.4)
+                media.export(source,target,options,watermark_path=logo)
+                frame=target.with_suffix('.png')
+                media.run(['ffmpeg','-v','error','-i',str(target),'-frames:v','1','-threads','1',str(frame)])
+                with Image.open(frame) as image:
+                    r,g,b=image.convert('RGB').split()
+                    mask=ImageChops.multiply(r.point(lambda v:255 if v>180 else 0),g.point(lambda v:255 if v<70 else 0))
+                    box=mask.getbbox();self.assertIsNotNone(box)
+                    w,h=image.size;mw=round(w*.2);mh=round(mw/2)
+                    self.assertAlmostEqual(box[0],(w-mw)*x/100,delta=3)
+                    self.assertAlmostEqual(box[1],(h-mh)*y/100,delta=3)
+                    self.assertAlmostEqual(box[2]-box[0],mw,delta=3)
+        # Text is positioned by its rendered bounds, including at the canvas edge.
+        target=self.directory/'free-text.mp4'
+        options=media.settings(dict(end=.4,layout='original',watermark=dict(enabled=True,text='MOVEL',position='custom',x=0,y=0,size=10,opacity=1)),.4)
+        media.export(source,target,options)
+        frame=target.with_suffix('.png');media.run(['ffmpeg','-v','error','-i',str(target),'-frames:v','1','-threads','1',str(frame)])
+        with Image.open(frame) as image:
+            mask=image.convert('RGB').getchannel('G').point(lambda v:255 if v>180 else 0)
+            self.assertLessEqual(mask.getbbox()[0],2);self.assertLessEqual(mask.getbbox()[1],2)
+        with self.assertRaisesRegex(ValueError,'Referência 1'):
+            media.settings(dict(end=.4,watermark=dict(enabled=True,text='marca',position='title')),.4)
+
+    def test_phone_rotation_and_template_corner_position(self):
+        from PIL import Image
+        source=self.directory/'phone.mp4';rotated=self.directory/'phone-rotated.mp4'
+        media.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=320x180:r=30','-t','0.4','-c:v','libx264','-threads','1',str(source)])
+        media.run(['ffmpeg','-v','error','-display_rotation:v:0','90','-i',str(source),'-c','copy',str(rotated)])
+        self.assertEqual((media.probe(rotated)['width'],media.probe(rotated)['height']),(180,320))
+        target=self.directory/'phone-export.mp4'
+        options=media.settings(dict(end=.4,layout='original',watermark=dict(enabled=True,text='MOVEL',position='custom',x=100,y=100,size=10,opacity=1)),.4)
+        media.export(rotated,target,options)
+        self.assertEqual((media.probe(target)['width'],media.probe(target)['height']),(180,320))
+        target=self.directory/'impact-corner.mp4'
+        options=media.settings(dict(end=.4,template=dict(id='impact',title='TITULO'),watermark=dict(enabled=True,text='MOVEL',position='top-right',opacity=1)),.4)
+        media.export(source,target,options)
+        frame=target.with_suffix('.png');media.run(['ffmpeg','-v','error','-i',str(target),'-frames:v','1','-threads','1',str(frame)])
+        with Image.open(frame) as image:
+            upper=image.crop((0,0,1080,400)).convert('RGB').getchannel('G')
+            box=upper.point(lambda v:255 if v>180 else 0).getbbox()
+            self.assertIsNotNone(box);self.assertGreater(box[0],500);self.assertLess(box[1],120)
+
     def test_missing_speech_does_not_lose_video_or_photo(self):
         source=self.directory/'silent-fallback.mp4'
         media.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=160x90:r=30','-t','0.5','-c:v','libx264','-threads','1',str(source)])

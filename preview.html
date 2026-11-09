@@ -435,6 +435,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .watermark-preview[data-position='bottom-left'] { bottom: 10%; left: 3.5%; }
 .watermark-preview[data-position='bottom-right'] { bottom: 10%; right: 3.5%; }
 #templateCanvas { width: 100%; height: 100%; object-fit: contain; background: #050805; }
+#templateCanvas.watermark-movable { cursor: grab; touch-action: none; }
+#templateCanvas.watermark-movable:active { cursor: grabbing; }
 .templates-library { border: 1px solid #3a512e; border-radius: 14px; padding: 28px; background: #111b12; }
 .templates-library h2 { font-size: 30px; font-weight: 500; letter-spacing: -.8px; line-height: 1.2; margin: 14px 0; }
 .templates-library p { font-size: 14px; color: #a3b69a; line-height: 1.8; }
@@ -509,7 +511,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
         <div class="upload-radar" aria-hidden="true"><span></span><span></span><div class="upload-icon"><svg viewBox="0 0 32 32"><path d="M16 22V8m-6 6 6-6 6 6M7 22v4h18v-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div><div class="upload-kicker">DROP YOUR NEXT BIG THING</div><h3>Solte o vídeo.<br><span>Liberte as possibilidades.</span></h3><p>Arraste seu arquivo para começar a criar.</p><button class="button primary" id="selectVideo" type="button">＋ Selecionar vídeo</button><small>MP4, MOV ou WebM · até 2 GB</small><div class="drop-corner corner-tl" aria-hidden="true"></div><div class="drop-corner corner-tr" aria-hidden="true"></div><div class="drop-corner corner-bl" aria-hidden="true"></div><div class="drop-corner corner-br" aria-hidden="true"></div>
       </div>
       <input type="file" id="videoFile" accept="video/*" hidden>
-      <div class="preview-wrap" id="previewWrap" hidden><div class="video-stage" id="videoStage"><video id="video" controls playsinline preload="metadata"></video><canvas id="templateCanvas" width="1080" height="1920" hidden aria-label="Prévia do template"></canvas><div id="watermarkPreview" class="watermark-preview" hidden><img id="watermarkLogoPreview" alt="Logo da marca" hidden><span id="watermarkTextPreview"></span></div><div class="safe-guide" id="safeGuide" hidden><span>GUIA VISUAL · ÁREA CENTRAL</span></div></div><div class="preview-caption"><span id="filename"></span><button class="text-button" id="replaceVideo">Trocar vídeo →</button></div></div>
+      <div class="preview-wrap" id="previewWrap" hidden><div class="video-stage" id="videoStage"><video id="video" controls playsinline preload="metadata"></video><canvas id="templateCanvas" width="1080" height="1920" hidden aria-label="Prévia do vídeo e posição da marca d’água"></canvas><div id="watermarkPreview" class="watermark-preview" hidden><img id="watermarkLogoPreview" alt="Logo da marca" hidden><span id="watermarkTextPreview"></span></div><div class="safe-guide" id="safeGuide" hidden><span>GUIA VISUAL · ÁREA CENTRAL</span></div></div><div class="preview-caption"><span id="filename"></span><button class="text-button" id="replaceVideo">Trocar vídeo →</button></div></div>
       <div class="upload-progress" id="uploadProgress" hidden><progress id="progressBar" max="100" value="0"></progress><span id="progressText">Enviando…</span></div>
       <div class="timeline-section"><div class="row"><h3>Intervalo de edição</h3><button class="text-button" id="previewSelection" disabled><span class="play-icon" aria-hidden="true"></span> Reproduzir seleção</button></div><div class="timeline-track" id="timelineTrack"><div class="timeline-selection" id="timelineSelection"></div><div class="timeline-ticks"></div></div><div class="time-inputs"><label>Início <div><input id="start" type="number" min="0" value="0" step="0.1" disabled><span>s</span><button id="markStart" title="Usar posição atual como início" disabled>⌖</button></div></label><span class="time-arrow">→</span><label>Fim <div><input id="end" type="number" min="0" value="0" step="0.1" disabled><span>s</span><button id="markEnd" title="Usar posição atual como fim" disabled>⌖</button></div></label><span id="selectedDuration" class="duration-badge">0,0 s selecionados</span></div></div>
     </section>
@@ -520,7 +522,7 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
       <div class="separator"></div><label class="field-label" for="crf">QUALIDADE</label><select id="crf"><option value="18">Alta qualidade · arquivos maiores</option><option value="21">Equilibrada · recomendada</option><option value="24">Compacta · arquivos menores</option></select><label class="check-label"><input type="checkbox" id="normalize" checked> Normalizar volume do áudio</label>
       <div class="separator"></div><label class="field-label" for="templateSelect">TEMPLATE AUTOMÁTICO</label><select id="templateSelect"><option value="none">Sem template · enquadramento padrão</option><option value="impact">Referência 1 · foto e faixa preta</option><option value="compare">Referência 2 · foto em duas partes</option><option value="red">Referência 3 · faixa vermelha rasgada</option></select><p class="field-help">Layouts das suas referências. A foto inferior é extraída automaticamente do corte.</p>
       <div id="templateFields" hidden><p class="field-help">Ao concluir o corte, escolha uma das opções de título e legenda geradas a partir da fala.</p><details><summary>Ajustar texto e destaque (opcional)</summary><label class="field-label spaced" for="templateTitle">TÍTULO CENTRAL</label><input id="templateTitle" class="wide-input" maxlength="120" placeholder="O gancho do seu corte"><label class="field-label spaced" for="templateHighlight">DESTAQUE EM AMARELO</label><input id="templateHighlight" class="wide-input" maxlength="80" placeholder="Destaques automáticos do título"><p class="field-help">O plano superior é o vídeo. A foto inferior vem automaticamente de um frame do corte.</p></details></div>
-      <div class="separator"></div><fieldset class="watermark-settings"><legend>Marca d’água automática</legend><label class="check-label"><input type="checkbox" id="watermarkEnabled"> Aplicar em todos os cortes</label><div id="watermarkFields" hidden><label class="field-label spaced" for="watermarkType">TIPO DE MARCA</label><select id="watermarkType"><option value="text">Texto / @perfil</option><option value="logo">Logo PNG ou JPEG</option></select><div id="watermarkTextField"><label class="field-label spaced" for="watermarkText">SUA MARCA</label><input class="wide-input" id="watermarkText" maxlength="80" placeholder="@seuperfil"></div><div id="watermarkLogoField" hidden><label class="field-label spaced" for="watermarkFile">ENVIAR LOGO · ATÉ 5 MB</label><input id="watermarkFile" type="file" accept="image/png,image/jpeg"><p id="watermarkFileStatus" class="field-help">PNG transparente preserva o fundo do vídeo.</p></div><label class="field-label spaced" for="watermarkPosition">POSIÇÃO</label><select id="watermarkPosition"><option value="top-right">Superior direita</option><option value="top-left">Superior esquerda</option><option value="bottom-right">Inferior direita</option><option value="bottom-left">Inferior esquerda</option></select><label class="range-label" for="watermarkOpacity">Transparência / opacidade <output id="watermarkOpacityValue">80%</output></label><input id="watermarkOpacity" type="range" min="10" max="100" value="80"><label class="range-label" for="watermarkSize">Tamanho <output id="watermarkSizeValue">4%</output></label><input id="watermarkSize" type="range" min="2" max="30" value="4"><p class="field-help">A posição na prévia é aproximada. Texto: % da altura; logo: % da largura. A configuração fica salva neste navegador.</p></div></fieldset>
+      <div class="separator"></div><fieldset class="watermark-settings"><legend>Marca d’água automática</legend><label class="check-label"><input type="checkbox" id="watermarkEnabled"> Aplicar em todos os cortes</label><div id="watermarkFields" hidden><label class="field-label spaced" for="watermarkType">TIPO DE MARCA</label><select id="watermarkType"><option value="text">Texto / @perfil</option><option value="logo">Logo PNG ou JPEG</option></select><div id="watermarkTextField"><label class="field-label spaced" for="watermarkText">SUA MARCA</label><input class="wide-input" id="watermarkText" maxlength="80" placeholder="@seuperfil"></div><div id="watermarkLogoField" hidden><label class="field-label spaced" for="watermarkFile">ENVIAR LOGO · ATÉ 5 MB</label><input id="watermarkFile" type="file" accept="image/png,image/jpeg"><p id="watermarkFileStatus" class="field-help">PNG transparente preserva o fundo do vídeo.</p></div><label class="field-label spaced" for="watermarkPosition">POSIÇÃO</label><select id="watermarkPosition"><option value="top-right">Superior direita</option><option value="top-left">Superior esquerda</option><option value="bottom-right">Inferior direita</option><option value="bottom-left">Inferior esquerda</option><option value="custom">Livre · arrastar na prévia</option><option value="title">Abaixo do título · referência 1</option></select><div id="watermarkCoordinates" hidden><label class="range-label" for="watermarkX">Horizontal <output id="watermarkXValue">50%</output></label><input id="watermarkX" type="range" min="0" max="100" step="0.1" value="50"><label class="range-label" for="watermarkY">Vertical <output id="watermarkYValue">50%</output></label><input id="watermarkY" type="range" min="0" max="100" step="0.1" value="50"><p class="field-help">Arraste a marca na prévia ou toque onde quer colocá-la. Os controles também funcionam pelo teclado.</p></div><label class="range-label" for="watermarkOpacity">Transparência / opacidade <output id="watermarkOpacityValue">80%</output></label><input id="watermarkOpacity" type="range" min="10" max="100" value="80"><label class="range-label" for="watermarkSize">Tamanho <output id="watermarkSizeValue">4%</output></label><input id="watermarkSize" type="range" min="2" max="30" value="4"><p class="field-help">A posição livre se adapta ao tamanho final do vídeo e fica salva neste navegador. Texto: % da altura; logo: % da largura.</p></div></fieldset>
       <div class="separator"></div><label class="field-label" for="clipTopic">TEMA ADICIONAL (OPCIONAL)</label><input class="wide-input" id="clipTopic" maxlength="160" placeholder="Ex.: comparação de perfumes"><button class="button secondary suggest-button" id="suggestPublication">Atualizar opções de título e legenda</button><p class="field-help">O servidor transcreve a fala e oferece opções ao terminar cada corte. Você escolhe; não precisa escrever o título.</p><section id="publicationChoices" class="publication-choices" aria-label="Escolher título e legenda"><p class="field-help">As opções aparecem aqui quando a transcrição do corte terminar.</p></section><label class="field-label spaced" for="publicationText">LEGENDA ESCOLHIDA</label><textarea id="publicationText" rows="5" placeholder="Sua sugestão editável aparecerá aqui."></textarea><button class="text-button" id="copyPublication">Copiar legenda e hashtags</button>
       <details class="subtitle-details"><summary>Legendas <span>+ SRT</span></summary><p class="field-help">A fala é transcrita automaticamente no servidor. Para substituir o texto, importe um SRT com os tempos do vídeo original. As legendas são ajustadas para cada corte e gravadas no vídeo.</p><input type="file" id="srtFile" accept=".srt,text/plain"><label class="sr-only" for="subtitles">Conteúdo SRT</label><textarea id="subtitles" rows="5" placeholder="Ou cole seu SRT aqui…"></textarea><small>Texto branco com contorno, posicionado na região inferior.</small></details>
       <button class="button primary export-button" id="exportButton" disabled>Gerar cortes <span>→</span></button><p class="export-note" id="exportNote">Envie um vídeo para começar.</p></div>
@@ -627,7 +629,7 @@ function choosePreset(name) {
 document.querySelectorAll('[data-preset]').forEach(button=>button.onclick=()=>choosePreset(button.dataset.preset));
 function watermarkValues() {
   return {enabled:$('watermarkEnabled').checked,type:$('watermarkType').value,text:$('watermarkText').value,
-    logo_id:state.logo?.id||'',position:$('watermarkPosition').value,opacity:Number($('watermarkOpacity').value)/100,size:Number($('watermarkSize').value)};
+    logo_id:state.logo?.id||'',position:$('watermarkPosition').value,x:Number($('watermarkX').value),y:Number($('watermarkY').value),opacity:Number($('watermarkOpacity').value)/100,size:Number($('watermarkSize').value)};
 }
 function values() {
   return {asset_id:state.asset?.id,reedit_of:state.editing,preset:state.preset,start:Number($('start').value),end:Number($('end').value),
@@ -635,6 +637,9 @@ function values() {
     subtitles:$('subtitles').value,watermark:watermarkValues(),template:{id:$('templateSelect').value,title:$('templateTitle').value,highlight:$('templateHighlight').value,topic:$('clipTopic').value}};
 }
 function update() {
+  const titleAllowed=$('templateSelect').value==='impact'&&$('watermarkType').value==='text';
+  $('watermarkPosition').querySelector('[value=title]').disabled=!titleAllowed;
+  if($('watermarkPosition').value==='title'&&!titleAllowed)$('watermarkPosition').value='top-right';
   const options=values(),duration=Math.max(0,options.end-options.start),wm=options.watermark;
   $('selectedDuration').textContent=duration.toLocaleString('pt-BR',{maximumFractionDigits:1})+' s selecionados';
   $('lengthField').hidden=!options.batch; $('batchHelp').hidden=!options.batch;
@@ -646,12 +651,8 @@ function update() {
   $('templateFields').hidden=options.template.id==='none';
   $('watermarkFields').hidden=!wm.enabled; $('watermarkTextField').hidden=wm.type!=='text'; $('watermarkLogoField').hidden=wm.type!=='logo';
   $('watermarkOpacityValue').textContent=Math.round(wm.opacity*100)+'%'; $('watermarkSizeValue').textContent=wm.size+'%';
-  const overlay=$('watermarkPreview');
-  overlay.hidden=!state.asset||!wm.enabled||options.template.id!=='none'; overlay.dataset.position=wm.position; overlay.style.opacity=wm.opacity;
-  $('watermarkTextPreview').textContent=wm.type==='text'?wm.text:'';
-  $('watermarkTextPreview').style.fontSize=Math.max(10,Math.min(30,wm.size*3))+'px';
-  $('watermarkLogoPreview').hidden=wm.type!=='logo'||!state.logo;
-  if(state.logo){$('watermarkLogoPreview').src=state.logo.url;$('watermarkLogoPreview').style.width=(wm.size*3)+'px';}
+  $('watermarkCoordinates').hidden=wm.position!=='custom';
+  $('watermarkXValue').textContent=wm.x.toFixed(1)+'%';$('watermarkYValue').textContent=wm.y.toFixed(1)+'%';
   if(state.asset){
     $('timelineSelection').style.left=Math.max(0,Math.min(100,options.start/state.asset.duration*100))+'%';
     $('timelineSelection').style.right=Math.max(0,Math.min(100,100-options.end/state.asset.duration*100))+'%';
@@ -660,7 +661,7 @@ function update() {
 }
 function applyWatermark(wm={},logo=null) {
   $('watermarkEnabled').checked=Boolean(wm.enabled); $('watermarkType').value=wm.type||'text'; $('watermarkText').value=wm.text||'';
-  $('watermarkPosition').value=wm.position||'top-right'; $('watermarkOpacity').value=Math.round((wm.opacity??.8)*100); $('watermarkSize').value=wm.size??4;
+  $('watermarkPosition').value=wm.position||'top-right';$('watermarkX').value=wm.x??50;$('watermarkY').value=wm.y??50; $('watermarkOpacity').value=Math.round((wm.opacity??.8)*100); $('watermarkSize').value=wm.size??4;
   state.logo=logo||(wm.logo_id?(previewMode?window.CRIA_PREVIEW.getLogo(wm.logo_id):{id:wm.logo_id,url:'/watermarks/'+wm.logo_id+'.png'}):null);
   $('watermarkFileStatus').textContent=state.logo?'Logo carregado. Será aplicado a todos os cortes.':'PNG transparente preserva o fundo do vídeo.';
 }
@@ -668,7 +669,7 @@ function storeWatermark() {
   try { const wm=watermarkValues(); if(previewMode&&wm.type==='logo'){wm.enabled=false;wm.logo_id='';} localStorage.setItem('cria-watermark-v1',JSON.stringify(wm)); } catch { /* Optional storage. */ }
 }
 for(const id of ['start','end','layout','mode','length','crf','normalize','templateSelect','templateTitle','templateHighlight','clipTopic']) $(id).addEventListener('input',update);
-for(const id of ['watermarkEnabled','watermarkType','watermarkText','watermarkPosition','watermarkOpacity','watermarkSize']) $(id).addEventListener('input',()=>{
+for(const id of ['watermarkEnabled','watermarkType','watermarkText','watermarkPosition','watermarkOpacity','watermarkSize','watermarkX','watermarkY']) $(id).addEventListener('input',()=>{
   if(id==='watermarkType') $('watermarkSize').value=$('watermarkType').value==='logo'?20:4;
   update();storeWatermark();
 });
@@ -830,7 +831,7 @@ $('sessionForm').onsubmit=async event=>{
 'use strict';
 (()=>{
   const video=$('video'),canvas=$('templateCanvas'),photo=new Image(),logo=new Image(),frozen=document.createElement('canvas'),upperFrame=document.createElement('canvas');
-  let photoURL='',logoURL='',assetID='',frame=0;
+  let photoURL='',logoURL='',assetID='',frame=0,watermarkBox=null,drag=null;
   const paper=[ [0,938],[82,925],[145,934],[210,916],[370,925],[490,914],[650,928],[805,921],[966,933],[1072,946],[1079,978],[1067,1015],[1077,1054],[1065,1110],[1080,1150],[1066,1203],[946,1214],[818,1206],[667,1221],[506,1211],[330,1224],[192,1210],[52,1217],[9,1200],[18,1163],[1,1120],[12,1083],[2,1044],[17,1008],[0,971] ];
   function view(ctx,source,x,y,w,h,focus=.5,zoom=1){
     const iw=source.videoWidth||source.naturalWidth||source.width,ih=source.videoHeight||source.naturalHeight||source.height;if(!iw||!ih)return;
@@ -844,43 +845,106 @@ $('sessionForm').onsubmit=async event=>{
   function lines(ctx,text,size){
     ctx.font=`900 ${size}px TemplateTitle,Arial,sans-serif`;const out=[];let line='';for(const word of text.split(/\s+/)){const next=(line+' '+word).trim();if(ctx.measureText(next).width>1000&&line){out.push(line);line=word;}else line=next;}if(line)out.push(line);return out;
   }
+  function dimensions(kind){
+    if(kind==='none'&&$('layout').value==='original'&&state.asset){
+      const factor=Math.min(1,1920/Math.max(state.asset.width,state.asset.height));
+      return [Math.floor(state.asset.width*factor/2)*2,Math.floor(state.asset.height*factor/2)*2];
+    }
+    return [1080,1920];
+  }
   function paint(target,kind){
-    const ctx=target.getContext('2d');ctx.save();ctx.clearRect(0,0,target.width,target.height);ctx.scale(target.width/1080,target.height/1920);ctx.fillStyle='#000';ctx.fillRect(0,0,1080,1920);
+    const [width,height]=dimensions(kind),ctx=target.getContext('2d');ctx.save();ctx.clearRect(0,0,target.width,target.height);ctx.scale(target.width/width,target.height/height);ctx.fillStyle='#000';ctx.fillRect(0,0,width,height);if(target===canvas)watermarkBox=null;
     const lower=photo.complete&&photo.naturalWidth?photo:frozen;
     const upper=target===canvas?(!video.paused?video:(upperFrame.width?upperFrame:lower)):lower;
-    if(kind==='red'){view(ctx,upper,0,84,1080,900);view(ctx,lower,0,984,1080,852,.5,1.25);}
+    if(kind==='none'){
+      if($('layout').value==='crop')view(ctx,upper,0,0,width,height);
+      else{const iw=upper.videoWidth||upper.naturalWidth||upper.width,ih=upper.videoHeight||upper.naturalHeight||upper.height;if(iw&&ih){const z=Math.min(width/iw,height/ih);ctx.drawImage(upper,(width-iw*z)/2,(height-ih*z)/2,iw*z,ih*z);}}
+    }
+    else if(kind==='red'){view(ctx,upper,0,84,1080,900);view(ctx,lower,0,984,1080,852,.5,1.25);}
     else if(kind==='compare'){view(ctx,upper,0,0,1080,960);view(ctx,lower,0,960,540,960,.25);view(ctx,lower,540,960,540,960,.75);}
     else{view(ctx,upper,0,0,1080,960);view(ctx,lower,0,960,1080,960,.5,1.5);}
-    const center=kind==='red'?1080:960;
+    const center=kind==='red'?1080:960;let size=82,rows=[];
+    if(kind!=='none'){
     if(kind==='red'){
       ctx.save();ctx.shadowColor='#0009';ctx.shadowBlur=9;ctx.shadowOffsetY=9;path(ctx,paper.map(([x,y],i)=>[Math.max(0,Math.min(1079,x+(i%3===0?8:-6))),y+(y<1000?-10:9)]));ctx.fillStyle='#f2f0e6';ctx.fill();ctx.restore();
       path(ctx,paper);ctx.fillStyle='#da000a';ctx.fill();ctx.save();ctx.clip();const shade=ctx.createLinearGradient(0,930,0,1225);shade.addColorStop(0,'#50000022');shade.addColorStop(.5,'#ff151500');shade.addColorStop(1,'#50000022');ctx.fillStyle=shade;ctx.fillRect(0,930,1080,300);ctx.restore();
     }else{
       const half=kind==='compare'?160:132,g=ctx.createLinearGradient(0,center-half,0,center+half);g.addColorStop(0,'#0000');g.addColorStop(.18,'#000');g.addColorStop(.82,'#000');g.addColorStop(1,'#0000');ctx.fillStyle=g;ctx.fillRect(0,center-half,1080,half*2);
     }
-    const text=$('templateTitle').value.toUpperCase().trim();let size=82,rows=lines(ctx,text,size);while(size>30&&(rows.length>3||rows.length*size*1.08>230)){size-=2;rows=lines(ctx,text,size);}
+    const text=$('templateTitle').value.toUpperCase().trim();rows=lines(ctx,text,size);while(size>30&&(rows.length>3||rows.length*size*1.08>230)){size-=2;rows=lines(ctx,text,size);}
     const marks=new Set($('templateHighlight').value.toLocaleUpperCase('pt-BR').replaceAll('|',' ').split(/\s+/));ctx.font=`900 ${size}px TemplateTitle,Arial,sans-serif`;ctx.textBaseline='top';
     for(let i=0;i<rows.length;i++){
       let x=(1080-ctx.measureText(rows[i]).width)/2;const y=center-rows.length*size*1.08/2+i*size*1.08;
       for(const word of rows[i].match(/\S+\s*/g)||[]){ctx.fillStyle=kind!=='red'&&marks.has(word.trim().replace(/[,.!?]/g,''))?'#ffdc00':'#fff';ctx.fillText(word,x,y);x+=ctx.measureText(word).width;}
     }
-    const wm=watermarkValues();if(wm.enabled){ctx.save();ctx.globalAlpha=wm.opacity;const left=wm.position.endsWith('left'),top=wm.position.startsWith('top');
-      if(wm.type==='logo'&&logo.complete&&logo.naturalWidth){const z=Math.min(1080*wm.size/100/logo.naturalWidth,480/logo.naturalHeight),w=logo.naturalWidth*z,h=logo.naturalHeight*z;ctx.drawImage(logo,left?38:1042-w,top?96:1824-h,w,h);}
-      else if(wm.type==='text'&&wm.text){const fs=kind==='impact'?28:Math.max(6,Math.min(Math.round(1920*wm.size/100),Math.round(1080*.84/Math.max(1,wm.text.length)/.65)));ctx.font=kind==='impact'?'900 28px TemplateTitle':`${fs}px Arial`;ctx.fillStyle='#fff';ctx.shadowColor='#000';ctx.shadowBlur=2;const w=ctx.measureText(wm.text).width,x=kind==='impact'?(1080-w)/2:left?38:1042-w,y=kind==='impact'?center+rows.length*size*1.08/2+9:top?96:1824-fs;ctx.fillText(wm.text,x,y);if(kind==='impact')for(const ox of[x-28,x+w+8]){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ox+10,y+12,10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ff000a';ctx.fillRect(ox+3,y+7,14,10);ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(ox+8,y+9);ctx.lineTo(ox+8,y+15);ctx.lineTo(ox+13,y+12);ctx.fill();}}ctx.restore();
-    }ctx.restore();
+    }
+    const wm=watermarkValues();
+    if(wm.enabled){
+      ctx.save();ctx.globalAlpha=wm.opacity;let mw=0,mh=0,fs=0,metrics=null;
+      const titleBrand=kind==='impact'&&wm.type==='text'&&wm.position==='title';
+      if(wm.type==='logo'&&logo.complete&&logo.naturalWidth){
+        const z=Math.min(Math.round(width*wm.size/100)/logo.naturalWidth,Math.round(height*.25)/logo.naturalHeight);mw=logo.naturalWidth*z;mh=logo.naturalHeight*z;
+      }else if(wm.type==='text'&&wm.text){
+        fs=titleBrand?28:Math.max(6,Math.min(Math.round(height*wm.size/100),Math.round(width*.84/Math.max(1,wm.text.length)/.65)));
+        ctx.font=titleBrand?`900 ${fs}px TemplateTitle`:`${fs}px "DejaVu Sans",Arial,sans-serif`;metrics=ctx.measureText(wm.text);
+        while(titleBrand&&metrics.width>940&&fs>10){fs--;ctx.font=`900 ${fs}px TemplateTitle`;metrics=ctx.measureText(wm.text);}
+        mw=metrics.width;mh=metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent;
+      }
+      const left=wm.position.endsWith('left'),top=wm.position.startsWith('top');
+      let x=left?Math.max(2,Math.round(width*.035)):width-mw-Math.max(2,Math.round(width*.035));
+      let y=top?Math.max(2,Math.round(height*.05)):height-mh-Math.max(2,Math.round(height*.05));
+      if(wm.position==='custom'){x=(width-mw)*wm.x/100;y=(height-mh)*wm.y/100;}
+      if(titleBrand){x=(1080-mw)/2;y=center+rows.length*size*1.08/2+9;}
+      x=Math.max(0,x);y=Math.max(0,y);
+      if(mw&&mh){
+        if(wm.type==='logo')ctx.drawImage(logo,x,y,mw,mh);
+        else{
+          ctx.fillStyle='#fff';ctx.textBaseline='alphabetic';ctx.shadowColor='#0009';ctx.shadowOffsetX=1;ctx.shadowOffsetY=1;ctx.fillText(wm.text,x,y+metrics.actualBoundingBoxAscent);
+          if(titleBrand)for(const ox of[x-28,x+mw+8]){ctx.shadowColor='transparent';ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(ox+10,y+12,10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ff000a';ctx.fillRect(ox+3,y+7,14,10);ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(ox+8,y+9);ctx.lineTo(ox+8,y+15);ctx.lineTo(ox+13,y+12);ctx.fill();}
+        }
+        if(target===canvas)watermarkBox={x,y,width:mw,height:mh};
+      }
+      ctx.restore();
+      if(target===canvas&&wm.position==='custom'&&watermarkBox){ctx.strokeStyle='#c1ff61';ctx.lineWidth=2;ctx.setLineDash([8,6]);ctx.strokeRect(x-3,y-3,mw+6,mh+6);}
+    }
+    ctx.restore();
   }
   function draw(){
-    const selected=$('templateSelect').value,active=selected!=='none'&&Boolean(state.asset);canvas.hidden=!active;video.hidden=active;
+    const selected=$('templateSelect').value,wm=watermarkValues(),active=(selected!=='none'||wm.enabled)&&Boolean(state.asset);canvas.hidden=!active;video.hidden=active;
+    canvas.classList.toggle('watermark-movable',wm.enabled);
+    const [w,h]=dimensions(selected);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
     if(!state.asset||video.readyState<2)return;if(!frozen.width)capture();if(active)paint(canvas,selected);
     if(!$('templatesPanel').hidden)document.querySelectorAll('.reference-canvas').forEach(target=>{paint(target,target.dataset.reference);target.parentElement.classList.add('has-video');});
   }
-  function loop(){captureUpper();draw();if(!video.paused&&!video.ended)frame=requestAnimationFrame(loop);}
+  function loop(){if(!canvas.hidden)captureUpper();draw();if(!video.paused&&!video.ended)frame=requestAnimationFrame(loop);}
+  function pointer(event){
+    const rect=canvas.getBoundingClientRect(),scale=Math.min(rect.width/canvas.width,rect.height/canvas.height);
+    return {x:(event.clientX-rect.left-(rect.width-canvas.width*scale)/2)/scale,y:(event.clientY-rect.top-(rect.height-canvas.height*scale)/2)/scale};
+  }
+  function moveMark(point){
+    if(!drag||!watermarkBox)return;
+    const x=Math.max(0,Math.min(100,(point.x-drag.x)/Math.max(1,canvas.width-watermarkBox.width)*100));
+    const y=Math.max(0,Math.min(100,(point.y-drag.y)/Math.max(1,canvas.height-watermarkBox.height)*100));
+    $('watermarkX').value=x.toFixed(1);$('watermarkY').value=y.toFixed(1);$('watermarkPosition').value='custom';update();storeWatermark();
+  }
+  canvas.addEventListener('pointerdown',event=>{
+    if(!watermarkValues().enabled||!watermarkBox||event.button!==0)return;
+    const point=pointer(event),box=watermarkBox;
+    if(point.x<0||point.y<0||point.x>canvas.width||point.y>canvas.height)return;
+    const hit=point.x>=box.x-12&&point.x<=box.x+box.width+12&&point.y>=box.y-12&&point.y<=box.y+box.height+12;
+    if(!hit&&watermarkValues().position!=='custom')return;
+    drag=hit?{x:point.x-box.x,y:point.y-box.y}:{x:box.width/2,y:box.height/2};
+    event.preventDefault();canvas.setPointerCapture(event.pointerId);moveMark(point);
+  });
+  canvas.addEventListener('pointermove',event=>{if(drag){event.preventDefault();moveMark(pointer(event));}});
+  for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,()=>{drag=null;});
   video.addEventListener('play',()=>{cancelAnimationFrame(frame);loop();});
   for(const event of ['pause','seeked','loadeddata','loadedmetadata'])video.addEventListener(event,()=>{if(event==='loadeddata'||event==='seeked')captureUpper();draw();});
   document.addEventListener('studiochange',()=>{
     if(assetID!==state.asset?.id){assetID=state.asset?.id;frozen.width=0;upperFrame.width=0;photoURL='';photo.removeAttribute('src');}
     if(state.photo&&photoURL!==state.photo){photoURL=state.photo;photo.onload=draw;photo.src=photoURL;}
     if(state.logo?.url&&state.logo.url!==logoURL){logoURL=state.logo.url;logo.onload=draw;logo.src=logoURL;}
+    if(!state.logo&&logoURL){logoURL='';logo.removeAttribute('src');}
     draw();
   });document.fonts.ready.then(draw);draw();
 })();

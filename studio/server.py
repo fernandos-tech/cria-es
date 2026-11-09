@@ -62,6 +62,8 @@ def work(job_id, source, options, cues):
                 with LOCK:
                     JOBS[job_id]['requested_template'] = copy.deepcopy(options['template'])
                 options['template']['id'] = 'none'
+                if options['watermark']['position'] == 'title':
+                    options['watermark']['position'] = 'top-right'
                 warnings.append('O corte e a foto foram gerados sem o template porque não há fala reconhecida para criar o título. Aplique o template novamente após obter a transcrição.')
         if not publication['title']:
             publication['source'] = 'Não há fala transcrita disponível para sugerir título e legenda neste corte.'
